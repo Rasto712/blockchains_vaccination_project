@@ -70,6 +70,12 @@ class FormatDenialTests(unittest.TestCase):
     def test_reason_member_becomes_its_name(self):
         self.assertEqual(disclosure.format_denial(OUTCOME_DENIED, Reason.REVOKED, TX_HASH)["reason"], "REVOKED")
 
+    def test_reason_code_becomes_its_name(self):
+        # web3 decodes the Reason enum in an event as a plain int
+        self.assertEqual(disclosure.format_denial(OUTCOME_DENIED, 7, TX_HASH)["reason"], "HASH_MISMATCH")
+        with self.assertRaises(ValueError):
+            disclosure.format_denial(OUTCOME_DENIED, 8, TX_HASH)
+
     def test_allowed_and_unknown_values_are_refused(self):
         for outcome, reason in ((OUTCOME_ALLOWED, ""), ("unimplemented", ""), (OUTCOME_DENIED, "revoked"), (OUTCOME_DENIED, "7")):
             with self.subTest(outcome=outcome, reason=reason):
