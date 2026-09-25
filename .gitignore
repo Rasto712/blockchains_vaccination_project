@@ -1,0 +1,13 @@
+# Local runtime data and dependencies; never commit salts or keys.
+runtime-data/
+.venv/
+__pycache__/
+*.py[cod]
+.env
+node_modules/
+artifacts/
+cache/
+coverage/
+archive/
+# Preserve user IDE settings locally, outside the implementation scaffold.
+.idea/

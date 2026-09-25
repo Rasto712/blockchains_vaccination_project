@@ -1,0 +1,16 @@
+{
+  "child_id": "child-demo-001",
+  "vaccinations": [
+    {
+      "vaccine": "MMR",
+      "covers": [
+        "measles",
+        "mumps",
+        "rubella"
+      ],
+      "date": "2026-03-12",
+      "clinic": "Clinic A (demo)",
+      "batch": "ABC123-DEMO"
+    }
+  ]
+}

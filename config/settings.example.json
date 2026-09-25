@@ -1,0 +1,20 @@
+{
+  "description": "Example only. No connection or deployment exists yet. Resolve paths relative to project root.",
+  "rpc_url": "http://127.0.0.1:8545",
+  "expected_chain_id": 31337,
+  "deployment_file": "runtime-data/deployment.json",
+  "vaccination_file": "runtime-data/vaccination_record.json",
+  "vaccination_salt_file": "runtime-data/private/vaccination_salt.json",
+  "identity_directory": "runtime-data/identities",
+  "actor_account_indices": {
+    "deployer": 0,
+    "clinic": 1,
+    "guardian": 2,
+    "school": 3,
+    "doctor": 4
+  },
+  "scopes": {
+    "MEASLES_STATUS": 1,
+    "VACCINATION_SCHEDULE": 2
+  }
+}

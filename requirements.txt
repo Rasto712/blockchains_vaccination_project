@@ -1,0 +1,4 @@
+# The scaffold and startup main use only Python's standard library.
+# Developer 4: install/pin the lab-compatible web3.py version when implementing app/chain.py.
+# Example major range to verify with the lab before locking: web3>=7,<8
+# No third-party Python dependency is needed merely to run python -m app.main.

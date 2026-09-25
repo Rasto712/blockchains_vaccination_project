@@ -1,0 +1,34 @@
+{
+  "description": "Synthetic fixture attributes only; no keys, passwords or real personal data.",
+  "accounts": [
+    {
+      "label": "deployer",
+      "unique_id": "deployer-demo-001",
+      "email": "deployer@example.test"
+    },
+    {
+      "label": "clinic",
+      "unique_id": "clinic-demo-001",
+      "email": "clinic@example.test"
+    },
+    {
+      "label": "guardian",
+      "unique_id": "guardian-demo-001",
+      "email": "guardian@example.test"
+    },
+    {
+      "label": "school",
+      "unique_id": "school-demo-001",
+      "email": "school@example.test"
+    },
+    {
+      "label": "doctor",
+      "unique_id": "doctor-demo-001",
+      "email": "doctor@example.test"
+    }
+  ],
+  "child": {
+    "child_id": "child-demo-001",
+    "guardian_label": "guardian"
+  }
+}
