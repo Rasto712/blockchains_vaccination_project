@@ -10,9 +10,10 @@
     "node": "hardhat node"
   },
   "devDependencies": {
+    "forge-std": "github:foundry-rs/forge-std#v1.16.2",
     "hardhat": "3.18.0"
   },
   "engines": {
-    "node": ">=22.10.0"
+    "node": ">=22.13.0"
   }
 }

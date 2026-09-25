@@ -40,21 +40,28 @@ def demonstrate_doctor_flow(settings: dict[str, Any]) -> None:
     raise NotImplementedError("demonstrate_doctor_flow is an implementation task; see docs/tasks.")
 
 
-def demonstrate_revocation_and_expiry(settings: dict[str, Any]) -> None:
-    """Revoke and assert denied audit; use controlled local-node time advancement to test exact expiry.
-
-    Current behavior: unimplemented. Replace with the documented workflow.
-    """
-    raise NotImplementedError("demonstrate_revocation_and_expiry is an implementation task; see docs/tasks.")
-
-
 def demonstrate_tampering(settings: dict[str, Any], copied_fixture: Path) -> None:
-    """Alter a copy of the frozen JSON, assert integrity denial and restore the fixture afterward.
-    Never alter real user data or silently register a replacement hash.
+    """Run while the doctor grant is still active, before any time advance.
+    Copy runtime-data/vaccination_record.json to runtime-data/tamper/vaccination_record.json (copied_fixture)
+    and change one byte inside the batch value (ABC123-DEMO to ABC124-DEMO) so it still validates.
+    Run the doctor request with a copy of settings whose vaccination_file points to the copy
+    (operator setting, never requester input).
+    Assert denied (HASH_MISMATCH) and no payload, delete the copy even if something fails, then show the
+    original still verifies. The frozen file is never opened for writing and no replacement hash is registered.
 
     Current behavior: unimplemented. Replace with the documented workflow.
     """
     raise NotImplementedError("demonstrate_tampering is an implementation task; see docs/tasks.")
+
+
+def demonstrate_revocation_and_expiry(settings: dict[str, Any]) -> None:
+    """Revoke school consent and assert denied (REVOKED). Then regrant school for 1 day (assert no second
+    reward), set the next block timestamp to expiresAt with evm_setNextBlockTimestamp and assert denied (EXPIRED).
+    Run this last: node time cannot go back.
+
+    Current behavior: unimplemented. Replace with the documented workflow.
+    """
+    raise NotImplementedError("demonstrate_revocation_and_expiry is an implementation task; see docs/tasks.")
 
 
 def main() -> None:

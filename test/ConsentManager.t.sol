@@ -1,18 +1,19 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity 0.8.28;
 
+import {Test} from "forge-std/Test.sol";
 import {ConsentManager} from "../contracts/ConsentManager.sol";
 
 /**
  * @title ConsentManagerTest
  * @notice Developer 2: Solidity unit-test outline for Hardhat / Lab 3.
  * @dev These are UNIMPLEMENTED tests, not passing coverage. Every test deliberately reverts.
- *      Replace each body with meaningful setup/actions/assertions and the lab's cheatcode helpers.
+ *      Replace each body with meaningful setup/actions/assertions and forge-std Test cheatcodes (vm.prank, vm.warp, vm.expectEmit, vm.expectRevert).
  *      Do not fix this suite by deleting reverts without adding the required assertions.
  */
-contract ConsentManagerTest {
+contract ConsentManagerTest is Test {
     error TestNotImplemented();
-    // TODO: Add fixture contract references, independent actors and Lab 3 test helpers.
+    // TODO: Add fixture contract references, independent actors and forge-std cheatcodes.
 
     /// @notice Deploy fresh fixtures and prepare independent actors before each test.
     function setUp() public {
@@ -24,7 +25,7 @@ contract ConsentManagerTest {
         revert TestNotImplemented();
     }
 
-    /// @notice Reject 0 and 366 days; accept 1 and 365 days using lab time helpers.
+    /// @notice Reject 0 and 366 days; accept 1, 194, 195 and 365 days (195 and above catch the uint24 overflow).
     function testDurationBounds() public pure {
         revert TestNotImplemented();
     }
@@ -59,7 +60,7 @@ contract ConsentManagerTest {
         revert TestNotImplemented();
     }
 
-    /// @notice Compare altered and missing local-data commitments; neither may return allowed.
+    /// @notice Compare altered and missing local-data commitments; both denied with HashMismatch (7).
     function testHashMismatchAndZeroObservedHashAreDenied() public pure {
         revert TestNotImplemented();
     }
@@ -69,8 +70,13 @@ contract ConsentManagerTest {
         revert TestNotImplemented();
     }
 
-    /// @notice Grant, revoke/expire and regrant; the same owner/requester/scope has exactly one lifetime reward.
+    /// @notice Grant, revoke/expire and regrant; after the regrant checkAccess returns Allowed, getConsent shows revoked == false, and the tuple still has exactly one lifetime reward.
     function testRegrantDoesNotRepeatReward() public pure {
+        revert TestNotImplemented();
+    }
+
+    /// @notice A different requester or scope for the same owner earns its own single reward (key is the full tuple).
+    function testDifferentRequesterOrScopeEarnsOwnReward() public pure {
         revert TestNotImplemented();
     }
 

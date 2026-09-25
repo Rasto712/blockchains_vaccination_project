@@ -29,6 +29,9 @@ def measure_transaction(send_transaction: Any) -> dict[str, Any]:
 def run_requester_scenario(settings: dict[str, Any], requester_count: int) -> list[dict[str, Any]]:
     """Run a documented local scenario for 1, 5 or 10 requesters with independent accounts.
     Keep first rewarded grants, unrewarded regrants, allowed and denied access in distinct groups.
+    Every role acts: deployer (deploy, set minter), clinic (attest), guardian (register, grant, revoke),
+    requesters from scenario_requester_account_indices (register, request). Redeploy fresh contracts
+    before each run, then re-register and re-attest. Report mean gas and time per operation and role.
 
     Current behavior: unimplemented. Replace with the documented workflow.
     """

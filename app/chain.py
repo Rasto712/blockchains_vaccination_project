@@ -1,5 +1,12 @@
 """Developer 4: one Python-to-local-Hardhat boundary.
-Use the lab-selected web3.py client during implementation. No connection is opened on import.
+Use web3 8.0.0 (requirements.txt) during implementation. No connection is opened on import.
+
+Errors: web3 ContractLogicError (covers Custom and Panic errors) raised at transact() maps to
+TransactionRejected; TimeExhausted maps to TransactionPending; RPC down or wrong chain ID maps to
+ChainUnavailable. Never include calldata or local data in messages.
+
+Convention: in transaction helpers the first address after the contract is the signer; view helpers
+follow the contract argument order; callers pass owner/requester/guardian as keywords.
 
 All workflow methods are placeholders. They raise NotImplementedError rather than
 returning fake data or pretending that authorization has succeeded.
@@ -12,6 +19,8 @@ from app.models import Scope, IdentityInfo, ConsentDecision, AccessAttempt, Rece
 def load_settings(path: Path) -> dict[str, Any]:
     """Read RPC URL, expected chain ID, deployment/ABI references and actor account indices.
     Resolve paths relative to the project root. Contract addresses must be deployed values, not null placeholders.
+    Read settings, then load deployment_file; its addresses must be non-null; ABIs come from artifacts_dir
+    (<artifacts_dir>/<Name>.sol/<Name>.json, keys abi and bytecode).
 
     Current behavior: unimplemented. Replace with the documented workflow.
     """
@@ -74,7 +83,7 @@ def get_user_info(registry: Any, account: str) -> IdentityInfo:
 
 def grant_consent(manager: Any, guardian: str, requester: str, scope: Scope, duration_days: int) -> Receipt:
     """Validate 1-365 days and submit the grant from the guardian wallet.
-    Check receipt status. Do not independently mint rewards in Python; the manager owns that atomic action.
+    Raise TransactionRejected on revert. Do not independently mint rewards in Python; the manager owns that atomic action.
 
     Current behavior: unimplemented. Replace with the documented workflow.
     """
@@ -121,6 +130,10 @@ def wait_for_receipt(client: Any, transaction_hash: str) -> Receipt:
 def decode_access_event(receipt: Receipt, expected_contract: str) -> AccessAttempt:
     """Decode the exact AccessAttempt log emitted by ConsentManager.
     Validate emitter and fields; no log means no permission. Record transaction hash for audit display.
+    Decode with the ConsentManager ABI from the compiled artifact via
+    contract.events.AccessAttempt().process_receipt({'logs': receipt['logs']}). process_receipt does not
+    filter by address, so keep only logs whose address equals expected_contract (checksummed) and
+    require exactly one.
 
     Current behavior: unimplemented. Replace with the documented workflow.
     """
@@ -138,6 +151,7 @@ def get_reward_balance(token: Any, account: str) -> int:
 def list_access_events(manager: Any, from_block: int) -> list[AccessAttempt]:
     """Query bounded AccessAttempt events and display minimal audit metadata.
     No delete-log operation is part of the design; no medical JSON belongs in these events.
+    Keep unknown scope codes as int; display as 'scope 3 (unsupported)'; never raise.
 
     Current behavior: unimplemented. Replace with the documented workflow.
     """

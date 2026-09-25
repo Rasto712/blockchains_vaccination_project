@@ -1,6 +1,7 @@
 {
   "description": "Fill with actual receipt-confirmed local deployment addresses after constructors are implemented.",
   "chain_id": 31337,
+  "artifacts_dir": "artifacts/contracts",
   "contracts": {
     "IdentityRegistry": null,
     "ConsentManager": null,

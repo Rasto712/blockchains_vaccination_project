@@ -6,6 +6,4 @@
 - Ran python -m app.main successfully; it prints scaffold status and exits.
 - Parsed all example JSON files and checked local Markdown links.
 
-Hardhat dependencies were not installed and the Hardhat runner/deployment were not executed. The Hardhat 3 manifest/configuration is a documented starter to align with Lab 3. Functional Solidity tests intentionally revert TestNotImplemented until implemented; no passing functional-test, gas or deployment claims are made.
-
-The prior Desktop project is preserved in archive/previous_java_scaffold.zip. Git history and the IDE directory remain in place. Only the agreed source/documentation layout is replaced.
+Hardhat 3.18.0 installed and run: npx hardhat build compiles with 0 errors; npx hardhat test solidity runs 23 outlines, all failing TestNotImplemented as intended. No passing functional-test, gas or deployment claims are made.

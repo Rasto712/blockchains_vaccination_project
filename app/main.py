@@ -28,7 +28,8 @@ def select_actor(settings: dict[str, Any]) -> str:
 
 def dispatch_action(choice: str, actor_label: str, settings: dict[str, Any]) -> None:
     """Connect one menu choice to records/chain/disclosure helpers.
-    Handle pending, denied, unavailable and unimplemented outcomes distinctly without exposing private data.
+    Handle pending, denied and unavailable outcomes distinctly without exposing private data.
+    "not implemented yet" is only a console message for NotImplementedError, not an outcome.
 
     Current behavior: unimplemented. Replace with the documented workflow.
     """

@@ -10,8 +10,12 @@ from app.models import VaccinationCard, RecordSnapshot
 
 def save_record(path: Path, card: VaccinationCard) -> None:
     """Validate and save the synthetic local card before clinic attestation.
-    Input path must resolve inside the configured data root. Reject malformed fields
+    Input path must resolve inside the configured data root (settings data_root). Reject malformed fields
     and unintended overwrite of the frozen evidence file; never save private keys.
+    Serialise as json.dumps(card, indent=2, ensure_ascii=False) plus one trailing newline, encode UTF-8
+    and write with Path.write_bytes (never write_text). That reproduces data/examples/vaccination_record.json
+    byte for byte (269 bytes, LF). Test vector with salt = bytes(range(32)) and the VACCINATION prefix:
+    3f2242f3cce59c18d546a104712ece887fdaf0563cd6bd3f4cb5c932cc6ec5b9.
 
     Current behavior: unimplemented. Replace with the documented workflow.
     """
@@ -49,6 +53,7 @@ def generate_salt() -> bytes:
 def save_salt(path: Path, salt: bytes) -> None:
     """Validate length and save the private salt locally as base64 metadata.
     Never include it in contract calls, ordinary logs or requester responses.
+    File format (every salt file, vaccination and identity): {"salt_b64": "<44-char base64 of 32 bytes>"}.
 
     Current behavior: unimplemented. Replace with the documented workflow.
     """
@@ -57,6 +62,7 @@ def save_salt(path: Path, salt: bytes) -> None:
 
 def load_salt(path: Path) -> bytes:
     """Load the matching base64 salt and require exactly 32 bytes.
+    Expects the {"salt_b64": "..."} format written by save_salt.
     A missing or invalid salt means unavailable evidence; never substitute an empty salt.
 
     Current behavior: unimplemented. Replace with the documented workflow.
@@ -87,6 +93,8 @@ def load_snapshot(record_path: Path, salt_path: Path) -> RecordSnapshot:
 def prepare_identity(identity_path: Path, salt_path: Path) -> bytes:
     """Validate synthetic identity attributes and compute a separate salted identity hash.
     Keep unique demo ID/email and salt locally; registration sends only the resulting bytes32.
+    identity_path is <identity_directory>/<label>.json; salt_path is <identity_salt_directory>/identity_<label>_salt.json;
+    hash only that file's bytes with the IDENTITY:v1 prefix.
 
     Current behavior: unimplemented. Replace with the documented workflow.
     """

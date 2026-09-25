@@ -51,6 +51,8 @@ contract ConsentManager {
     /**
      * @notice Grant a time-limited scope owned by the caller.
      * @dev Require registered parties, reject active duplicates, compute exclusive expiry, emit grant event and mint once per lifetime (owner,requester,scope) tuple. Failed mint must roll back the grant.
+     *      Compute expiresAt = block.timestamp + uint256(durationDays) * 1 days. Cast before multiplying: durationDays * 1 days is evaluated in uint24 and reverts from 195 days.
+     *      A grant writes the whole Consent: new expiresAt and revoked = false. It never clears the rewarded flag; only the first grant of a tuple sets it.
      * @param requester Exact registered requester wallet; not an entire organization.
      * @param scope 1 for measles status or 2 for vaccination schedule; reject other codes.
      * @param durationDays Whole days from 1 through 365 inclusive.
@@ -61,7 +63,8 @@ contract ConsentManager {
     }
     /**
      * @notice Revoke the caller's grant without altering another guardian's state.
-     * @dev Set revoked idempotently and emit ConsentRevoked for a state change. Never clear the permanent rewarded flag.
+     * @dev Revoking an active grant sets revoked and emits ConsentRevoked. Never clear the permanent rewarded flag. Unsupported scope reverts UnsupportedScope; never granted (expiresAt == 0) reverts NoConsentToRevoke;
+     *      already revoked is a no-op with no event; expired but not revoked sets revoked and emits ConsentRevoked.
      * @param requester Requester whose grant is being revoked.
      * @param scope Exact scope being revoked.
      */
@@ -84,7 +87,7 @@ contract ConsentManager {
     }
     /**
      * @notice Record one authenticated access attempt and return its decision.
-     * @dev Use current consent and compare nonzero observedHash with registered evidence. Once implemented, emit both positive and negative outcomes and return normally on business denial. The event proves an authorization attempt, not physical data delivery.
+     * @dev Use current consent; only if _evaluateAccess allows, compare observedHash (zero included) with the registered vaccinationHash; any difference, including zero, is HashMismatch (7); earlier denials keep their own reason. Once implemented, emit both positive and negative outcomes and return normally on business denial. The event proves an authorization attempt, not physical data delivery.
      * @param owner Guardian owning the record; requester is always msg.sender.
      * @param scope Requested scope; unsupported values must produce a denied event.
      * @param observedHash Hash computed by Python from its one local byte snapshot; zero signals unavailable/invalid local data.
@@ -133,7 +136,8 @@ contract ConsentManager {
     }
     /**
      * @notice Share the permission rules between read checks and logged access.
-     * @dev Suggested precedence: unsupported scope, registration, missing evidence, no grant, revoked, expired, allowed. Commitment mismatch is checked separately by requestAccess.
+     * @dev Required precedence (tests pin it): UnsupportedScope; NotRegistered (owner or requester); MissingEvidence; NoConsent (expiresAt == 0); Revoked; Expired (block.timestamp >= expiresAt); Allowed.
+     *      Commitment mismatch is checked separately by requestAccess.
      * @param owner Guardian wallet.
      * @param requester Authenticated requester wallet.
      * @param scope Requested scope.

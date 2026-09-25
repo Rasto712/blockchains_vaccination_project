@@ -1,18 +1,19 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity 0.8.28;
 
+import {Test} from "forge-std/Test.sol";
 import {ConsentRewardToken} from "../contracts/ConsentRewardToken.sol";
 
 /**
  * @title ConsentRewardTokenTest
  * @notice Developer 2: Solidity unit-test outline for Hardhat / Lab 3.
  * @dev These are UNIMPLEMENTED tests, not passing coverage. Every test deliberately reverts.
- *      Replace each body with meaningful setup/actions/assertions and the lab's cheatcode helpers.
+ *      Replace each body with meaningful setup/actions/assertions and forge-std Test cheatcodes (vm.prank, vm.warp, vm.expectEmit, vm.expectRevert).
  *      Do not fix this suite by deleting reverts without adding the required assertions.
  */
-contract ConsentRewardTokenTest {
+contract ConsentRewardTokenTest is Test {
     error TestNotImplemented();
-    // TODO: Add fixture contract references, independent actors and Lab 3 test helpers.
+    // TODO: Add fixture contract references, independent actors and forge-std cheatcodes.
 
     /// @notice Deploy fresh fixtures and prepare independent actors before each test.
     function setUp() public {

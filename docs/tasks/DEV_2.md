@@ -1,7 +1,5 @@
 # Developer 2: Reward token and Solidity unit tests
 
-Planned effort: 10-14 hours (8-12 core + 2 hours contingency).
-
 ## Files
 
 contracts/ConsentRewardToken.sol; test/IdentityRegistry.t.sol; test/ConsentManager.t.sol; test/ConsentRewardToken.t.sol. Use the lab's test-folder convention if different.
@@ -9,7 +7,7 @@ contracts/ConsentRewardToken.sol; test/IdentityRegistry.t.sol; test/ConsentManag
 ## Implementation steps
 
 1. Implement balances, total supply and a RewardMinted event. Allow deployer-controlled one-time minter setup and reject unauthorized minting. Keep reward units non-transferable unless the lab explicitly requires another standard.
-2. Configure tests as Solidity .t.sol files run by Hardhat, following Lab 3. Do not replace the required Solidity unit tests with only Python or TypeScript tests.
+2. Configure tests as Solidity .t.sol files run by Hardhat, following Lab 3. Do not replace the required Solidity unit tests with only Python or TypeScript tests. Tests inherit forge-std Test (declared in package.json); remove `pure` from an outline function once its body uses state or cheatcodes.
 3. Cover identity registration, duplicate/zero values and clinic-only frozen attestation. Cover grant duration boundaries, ownership, exact scope/requester and exact expiry.
 4. Assert the AccessAttempt event is present for denied well-formed calls; do not merely assert that something reverted. Check that no token transfer or mint occurs during access.
 5. Test first grant reward, duplicate active grant, revoke-and-regrant, expiry-and-regrant and a different requester/scope. The same tuple receives only one lifetime reward.

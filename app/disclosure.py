@@ -13,6 +13,7 @@ def select_school_status(card: VaccinationCard) -> dict[str, Any]:
     """Produce only a positive verified-status field for the supported MMR/measles fixture.
     Call only after trusted evidence and consent checks. Missing evidence is unavailable,
     not a clinical NO; do not include vaccine dates, clinic, batch, child name or file path.
+    Shape: {"measles_status": "verified"}.
 
     Current behavior: unimplemented. Replace with the documented workflow.
     """
@@ -22,6 +23,7 @@ def select_school_status(card: VaccinationCard) -> dict[str, Any]:
 def select_doctor_schedule(card: VaccinationCard) -> dict[str, Any]:
     """Return only vaccine/date fields from the validated authorized card.
     Do not return the original dictionary, raw bytes, coverage list, clinic, batch or salt.
+    Shape: {"vaccinations": [{"vaccine": ..., "date": ...}]}.
 
     Current behavior: unimplemented. Replace with the documented workflow.
     """
@@ -30,10 +32,13 @@ def select_doctor_schedule(card: VaccinationCard) -> dict[str, Any]:
 
 def perform_access(settings: dict[str, Any], requester_label: str, owner: str, scope: Scope) -> AccessResponse:
     """Coordinate one complete request using records.py and chain.py.
+    owner is the guardian's 0x address, not a label.
     Read/hash/parse one snapshot; submit observed hash (zero if local data is unavailable);
     await and validate the access event; compare with registered evidence; recheck current consent;
-    then project only the permitted fields from the same bytes. Release nothing on denial,
+    then project only the permitted fields from the same bytes. If the final recheck fails, submit one
+    more requestAccess so the late denial is logged. Release nothing on denial,
     network failure, missing event or changed authorization. Tokens do not move during access.
+    When Python itself submitted the zero hash, show outcome unavailable (not a clinical NO) whatever reason the event carries.
 
     Current behavior: unimplemented. Replace with the documented workflow.
     """
@@ -42,6 +47,7 @@ def perform_access(settings: dict[str, Any], requester_label: str, owner: str, s
 
 def verify_for_school(settings: dict[str, Any], owner: str) -> AccessResponse:
     """Invoke the access workflow under the SCHOOL account and MEASLES_STATUS scope.
+    owner is the guardian's 0x address, not a label.
     Return a status-only success or a denied/unavailable result with no health payload.
 
     Current behavior: unimplemented. Replace with the documented workflow.
@@ -51,6 +57,7 @@ def verify_for_school(settings: dict[str, Any], owner: str) -> AccessResponse:
 
 def get_doctor_schedule(settings: dict[str, Any], owner: str) -> AccessResponse:
     """Invoke the access workflow under the DOCTOR account and VACCINATION_SCHEDULE scope.
+    owner is the guardian's 0x address, not a label.
     Return allowlisted schedule fields only after every check and committed event succeeds.
 
     Current behavior: unimplemented. Replace with the documented workflow.
@@ -58,7 +65,7 @@ def get_doctor_schedule(settings: dict[str, Any], owner: str) -> AccessResponse:
     raise NotImplementedError("get_doctor_schedule is an implementation task; see docs/tasks.")
 
 
-def format_denial(outcome: str) -> AccessResponse:
+def format_denial(outcome: str, reason: str = "", transaction_hash: str = "") -> AccessResponse:
     """Build a nonclinical denied/unavailable response with an empty fields object.
     Do not echo exceptions containing medical JSON, secrets or local filesystem paths.
 

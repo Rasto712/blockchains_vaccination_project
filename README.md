@@ -1,12 +1,12 @@
 # My Vaccination Card - one-week scaffold
 
-**New architecture: three Solidity contracts + Python console + local JSON + local Hardhat.** This replaces the previous Java/Fabric source layout. The earlier Desktop project contents are preserved in archive/previous_java_scaffold.zip; its Git history and IDE folder are retained.
+**Architecture:** three Solidity contracts, a Python console and local JSON on a local Hardhat network.
 
 ## What works now
 
 `python -m app.main` prints a startup message and exits. Source files have typed method signatures, class/contract/data declarations, events and detailed implementation comments. Solidity and Python business operations are **not implemented**. Solidity calls/constructors revert NotImplemented; Python workflow stubs raise NotImplementedError. No contract is deployed and no permission, reward, hash or JSON I/O behavior is active.
 
-The three .t.sol files are test outlines and intentionally fail TestNotImplemented until real assertions are written. They are not passing tests or evidence of requirement completion. Files that are purely configuration, JSON or Markdown describe data/settings and do not contain artificial methods.
+The three .t.sol files are test outlines and intentionally fail TestNotImplemented until real assertions are written. They are not passing tests or evidence of requirement completion.
 
 ## Project layout
 
@@ -24,33 +24,52 @@ docs/            Revised PDF, architecture/UML, developer tasks and report outli
 
 ## Start here
 
-1. Read [developer plan](docs/developer_plan.pdf), [team assignments](docs/TEAM_TASKS.md) and [architecture](docs/ARCHITECTURE.md).
+1. Read [developer plan](docs/developer_plan.pdf), [team assignments](docs/TEAM_TASKS.md) and [architecture](docs/ARCHITECTURE.md). Read developer_plan.pdf together with [docs/PLAN_ERRATA.md](docs/PLAN_ERRATA.md); where the PDF differs from the Markdown docs or code docstrings, the Markdown docs and docstrings win.
 2. Agree [contract API](docs/CONTRACT_API.md) and Lab 3 versions before implementing.
 3. Implement one owned feature at a time; replace placeholder failures with the documented behavior.
 4. Use [validation requirements](docs/TESTING.md), [report outline](docs/REPORT_OUTLINE.md) and [demo checklist](docs/DEMO.md).
 
 ## Run the scaffold
 
-From the project root with Python 3.10 or newer:
+From the project root with Python 3.10 or newer.
 
-```powershell
+macOS / Linux:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
 python -m app.main
 ```
 
-No third-party Python package is required for the scaffold startup. Developer 4 adds and pins the lab-compatible web3.py dependency when implementing the RPC helper. Do not call deployment/integration scripts expecting success yet.
+If `python3 --version` is older than 3.10 (the macOS system Python is 3.9), use a newer one in the first line, for example `python3.13 -m venv .venv`.
+
+Windows PowerShell (no activation needed):
+
+```powershell
+py -3 -m venv .venv
+.venv\Scripts\python -m pip install -r requirements.txt
+.venv\Scripts\python -m app.main
+```
+
+No third-party Python package is required for the scaffold startup. The live file is config/settings.json, copied from config/settings.example.json; run npm run compile before any Python chain command. Do not call deployment/integration scripts expecting success yet.
+
+Python unit tests use the standard library, no pytest: `python -m unittest discover -s tests` (tests/ is separate from Hardhat's test/).
 
 ## Hardhat build setup
 
-The package manifest pins Hardhat 3.18.0 (verified in the npm registry) and Solidity 0.8.28. Configuration follows Hardhat 3's built-in Solidity test support. Use a supported modern Node release (the local verification runtime is Node 24); align with your lab template if its exact setup differs.
+package.json pins Hardhat 3.18.0 and forge-std; hardhat.config.ts pins solc 0.8.28 (optimiser on, 200 runs). Requires Node 22.13 or newer. Checked with npm ci, npx hardhat build and npx hardhat test solidity. If Lab 3 uses another Hardhat 3 version, change package.json and hardhat.config.ts together.
 
 ```powershell
-npm install
+npm ci
 npm run compile
 npm test
 npm run node
 ```
 
-`npm test` is intentionally unsuccessful until test outlines and contracts are implemented. `npm run node` only starts a local blockchain; it does not deploy or complete the application. Contract constructors and the Python deployment script currently fail explicitly. The only TypeScript file is Hardhat configuration; there is no JavaScript application/frontend.
+npm ci uses the committed package-lock.json, so git and SSH keys are not needed (forge-std comes from GitHub over HTTPS). Use npm install only when changing dependencies, then commit the new lockfile. An npm 11 'allowScripts' warning for esbuild is harmless.
+
+`npm test` is intentionally unsuccessful until test outlines and contracts are implemented. `npm run node` only starts a local blockchain; it does not deploy or complete the application. Contract constructors and the Python deployment script currently fail explicitly. The only TypeScript file is the Hardhat configuration; there is no frontend.
 
 ## Rules that must survive implementation
 
@@ -59,11 +78,11 @@ npm run node
 - Duration is 1-365 whole days; consent is invalid at the exact expiry timestamp.
 - Both allowed and denied access attempts need committed events. Remove placeholder reverts from the final business-denial path, since reverting would erase events.
 - Reward once per lifetime owner/requester/scope tuple. No tokens move during access; reward balances never authorize access.
-- School sees status only; doctor sees vaccine/date only. Failed evidence is unavailable/invalid, not a clinical NO.
+- School sees status only; doctor sees vaccine/date only. Failed evidence is unavailable, not a clinical NO.
 
 ## Official setup references
 
 - https://hardhat.org/docs/reference/configuration
 - https://hardhat.org/docs/guides/testing/using-solidity
 
-See docs/SCAFFOLD_VALIDATION.md for the checks actually performed on this delivery. Compiler success is not functional correctness.
+See docs/SCAFFOLD_VALIDATION.md for the checks actually performed on the scaffold. Compiler success is not functional correctness.
