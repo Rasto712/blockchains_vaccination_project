@@ -1,11 +1,20 @@
 """Developer 3: local JSON persistence and salted byte-snapshot commitments.
 Use fixed demo filenames under a configured root; no database, encryption or version store.
 
-All workflow methods are placeholders. They raise NotImplementedError rather than
-returning fake data or pretending that authorization has succeeded.
+Methods not written yet raise NotImplementedError rather than returning fake data
+or pretending that authorization has succeeded.
+AI note: parts of this file were written with help from Claude and checked by hand.
 """
+import hashlib
+import secrets
 from pathlib import Path
 from app.models import VaccinationCard, RecordSnapshot
+
+SALT_LENGTH = 32
+COMMITMENT_PREFIXES = {
+    "VACCINATION": b"VACCINATION:v1\n",
+    "IDENTITY": b"IDENTITY:v1\n",
+}
 
 
 def save_record(path: Path, card: VaccinationCard) -> None:
@@ -44,10 +53,8 @@ def parse_record(raw_bytes: bytes) -> VaccinationCard:
 def generate_salt() -> bytes:
     """Generate exactly 32 cryptographically random bytes for one frozen commitment.
     Use the standard secrets module during implementation; do not reuse fixed fixture salts.
-
-    Current behavior: unimplemented. Replace with the documented workflow.
     """
-    raise NotImplementedError("generate_salt is an implementation task; see docs/tasks.")
+    return secrets.token_bytes(SALT_LENGTH)
 
 
 def save_salt(path: Path, salt: bytes) -> None:
@@ -74,10 +81,16 @@ def calculate_commitment(raw_bytes: bytes, salt: bytes, purpose: str) -> bytes:
     """Return 32-byte SHA-256(prefix + salt + exact bytes).
     Only purposes VACCINATION and IDENTITY are supported. Prefix is the ASCII purpose
     followed by :v1 and one newline. Validate salt length; no JSON canonicalization is used.
-
-    Current behavior: unimplemented. Replace with the documented workflow.
     """
-    raise NotImplementedError("calculate_commitment is an implementation task; see docs/tasks.")
+    # error messages never include the record or salt
+    prefix = COMMITMENT_PREFIXES.get(purpose) if isinstance(purpose, str) else None
+    if prefix is None:
+        raise ValueError("unsupported commitment purpose")
+    if not isinstance(salt, bytes) or len(salt) != SALT_LENGTH:
+        raise ValueError("salt must be exactly 32 bytes")
+    if not isinstance(raw_bytes, bytes):
+        raise TypeError("record must be raw bytes")
+    return hashlib.sha256(prefix + salt + raw_bytes).digest()
 
 
 def load_snapshot(record_path: Path, salt_path: Path) -> RecordSnapshot:
