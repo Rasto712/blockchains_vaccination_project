@@ -1,6 +1,6 @@
 # Contract agreement
 
-Where developer_plan.pdf differs from the Markdown docs or code docstrings, the Markdown docs and docstrings win (see [PLAN_ERRATA.md](PLAN_ERRATA.md)).
+Where developer_plan.pdf differs from the Markdown docs or code docstrings, the Markdown docs and docstrings win.
 
 All constructor/function bodies currently revert NotImplemented. None are deployed or functional. NatSpec comments in each .sol file explain ownership, parameters, intended return values and validation rules. Keep named return types when implementing.
 

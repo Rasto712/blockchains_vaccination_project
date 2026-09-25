@@ -4,7 +4,11 @@
 
 ## What works now
 
-`python -m app.main` prints a startup message and exits. Source files have typed method signatures, class/contract/data declarations, events and detailed implementation comments. Solidity and Python business operations are **not implemented**. Solidity calls/constructors revert NotImplemented; Python workflow stubs raise NotImplementedError. No contract is deployed and no permission, reward, hash or JSON I/O behavior is active.
+`python -m app.main` starts the console menu. Without a node, two actions already work: "set up local files and salts" copies the synthetic fixtures into runtime-data/ and makes the salts, and "show my registration" prints the local identity hash (and, for guardian, the record commitment). The other actions print "not implemented yet" until app/chain.py and the contracts are done.
+
+The Python side is implemented: records, salts and commitments (app/records.py), the release rule and the school and doctor views (app/disclosure.py), the menu (app/main.py) and the tamper step in integration/demo_workflow.py. 106 unit tests cover it, and none of them needs a node: the ones that touch the chain use a fake (tests/fake_chain.py).
+
+Still stubs: the three contracts revert NotImplemented, and app/chain.py, scripts/deploy_local.py, evaluation/measure.py and the rest of integration/demo_workflow.py raise NotImplementedError. Nothing is deployed, so no consent or reward behaviour runs on-chain yet.
 
 The three .t.sol files are test outlines and intentionally fail TestNotImplemented until real assertions are written. They are not passing tests or evidence of requirement completion.
 
@@ -14,22 +18,25 @@ The three .t.sol files are test outlines and intentionally fail TestNotImplement
 contracts/       IdentityRegistry.sol, ConsentManager.sol, ConsentRewardToken.sol
 test/            Three matching Solidity .t.sol test outlines
 app/             main.py, records.py, chain.py, disclosure.py, models.py
+tests/           Python unit tests (standard library unittest); fake_chain.py stands in for app/chain.py
 scripts/         deploy_local.py (placeholder)
-integration/     demo_workflow.py (placeholder)
+integration/     demo_workflow.py (tamper step done, the rest still to do)
 evaluation/      measure.py and empty result-table templates
 config/          Example local settings and unset deployment addresses
 data/examples/   Synthetic local vaccination and identity fixtures
-docs/            Revised PDF, architecture/UML, developer tasks and report outline
+runtime-data/    Git ignored. The menu's setup makes the frozen record, identities and salts; deploy_local.py adds deployment.json
+docs/            Revised PDF, architecture/UML, developer tasks, handoff notes and report outline
 ```
 
 ## Start here
 
-1. Read [developer plan](docs/developer_plan.pdf), [team assignments](docs/TEAM_TASKS.md) and [architecture](docs/ARCHITECTURE.md). Read developer_plan.pdf together with [docs/PLAN_ERRATA.md](docs/PLAN_ERRATA.md); where the PDF differs from the Markdown docs or code docstrings, the Markdown docs and docstrings win.
+1. Read [developer plan](docs/developer_plan.pdf), [team assignments](docs/TEAM_TASKS.md) and [architecture](docs/ARCHITECTURE.md). Where developer_plan.pdf differs from the Markdown docs or code docstrings, the Markdown docs and docstrings win.
 2. Agree [contract API](docs/CONTRACT_API.md) and Lab 3 versions before implementing.
 3. Implement one owned feature at a time; replace placeholder failures with the documented behavior.
 4. Use [validation requirements](docs/TESTING.md), [report outline](docs/REPORT_OUTLINE.md) and [demo checklist](docs/DEMO.md).
+5. Handoff notes from the Python side: [Dev 1](docs/FOR_DEV_1.md), [Dev 2](docs/FOR_DEV_2.md), [Dev 4](docs/FOR_DEV_4.md) and [Dev 5](docs/FOR_DEV_5.md).
 
-## Run the scaffold
+## Run the console
 
 From the project root with Python 3.10 or newer.
 
@@ -39,6 +46,8 @@ macOS / Linux:
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
+cp config/settings.example.json config/settings.json
+python -m unittest discover -s tests
 python -m app.main
 ```
 
@@ -49,12 +58,16 @@ Windows PowerShell (no activation needed):
 ```powershell
 py -3 -m venv .venv
 .venv\Scripts\python -m pip install -r requirements.txt
+copy config\settings.example.json config\settings.json
+.venv\Scripts\python -m unittest discover -s tests
 .venv\Scripts\python -m app.main
 ```
 
-No third-party Python package is required for the scaffold startup. The live file is config/settings.json, copied from config/settings.example.json; run npm run compile before any Python chain command. Do not call deployment/integration scripts expecting success yet.
+In the menu, pick an actor, then 1 (set up local files and salts) and 10 (show my registration). Setup is safe to run again, because it leaves existing files alone. Do not delete runtime-data/ or its salts after the clinic has attested unless you also redeploy: new salts change every hash, and the registry refuses a second registration or attestation.
 
-Python unit tests use the standard library, no pytest: `python -m unittest discover -s tests` (tests/ is separate from Hardhat's test/).
+No third-party Python package is needed for the menu or the unit tests. The live file is config/settings.json, copied from config/settings.example.json; run npm run compile before any Python chain command. Run Python files with -m from the project root (for example `python -m integration.demo_workflow`), because running a file by its path cannot find the app package. Do not call deployment/integration scripts expecting success yet.
+
+Python unit tests use the standard library, no pytest: `python -m unittest discover -s tests` (tests/ is separate from Hardhat's test/). They need no node; the ones that touch the chain use a fake (tests/fake_chain.py).
 
 ## Hardhat build setup
 
