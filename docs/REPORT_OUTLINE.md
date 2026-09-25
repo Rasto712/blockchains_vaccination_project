@@ -8,7 +8,7 @@ A4, 1-inch margins, 10-pt Times New Roman, double spaced. At most 10 pages inclu
 
 ## Sections (use these headers exactly)
 
-1. Introduction: problem, 2-3 cited current systems, aims, no solution details. If the team's problem-statement PDF stays the Step 1 deliverable, say this prototype narrows it: one fixed clinic instead of an issuer registry, no 12/16 guardianship, rewards on every first grant, scope-level consent.
+1. Introduction: problem, 2-3 cited current systems, aims, no solution details.
 2. Architecture: roles and permissions, numbered requirements, attribute table (on-chain, off-chain, hashed), consent model with a state diagram or pseudocode, audit log design (who, what, when, granted/denied; logs cannot be deleted), component diagram mapped to the brief's Digital Identity and Data Sharing, access sequence.
 3. Implementation: contracts and key functions, Python modules, commitment scheme, requirement to function to test table, commands.
 4. Experimental Results: unit test table with why each matters, integration test, gas table (deployment and per function), optimisation choices with measured effect where a comparison exists, 1/5/10 multi-role simulation (time and cost).
