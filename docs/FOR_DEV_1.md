@@ -1,6 +1,6 @@
 # For Dev 1
 
-What the Python side needs from `contracts/IdentityRegistry.sol` and `contracts/ConsentManager.sol`, and what I need from you. Read this next to [tasks/DEV_1.md](tasks/DEV_1.md) and [CONTRACT_API.md](CONTRACT_API.md). Rasto's `chain.py` sits between your contracts and my code, and his notes are in [FOR_DEV_4.md](FOR_DEV_4.md).
+What the Python side needs from `contracts/IdentityRegistry.sol` and `contracts/ConsentManager.sol`, and what I need from you. Read this next to [tasks/DEV_1.md](tasks/DEV_1.md) and [CONTRACT_API.md](CONTRACT_API.md). Rasto's `chain.py` sits between your contracts and my code, and his notes are in [FOR_DEV_4.md](FOR_DEV_4.md). The other notes are [FOR_DEV_2.md](FOR_DEV_2.md) and [FOR_DEV_5.md](FOR_DEV_5.md).
 
 ## Where things stand
 
