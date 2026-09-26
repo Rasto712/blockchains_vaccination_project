@@ -81,8 +81,8 @@ contract IdentityRegistry {
      * @return vaccinationHash Frozen vaccination commitment, or zero when absent.
      */
     function getUserInfo(address account) external view returns (bool registered, bytes32 identityHash, bytes32 vaccinationHash) {
-        // TODO: Implement the documented behavior. Never return a fake successful result.
-        revert NotImplemented();
+        UserInfo storage user = _users[account];
+        return (user.registered, user.identityHash, user.vaccinationHash);
     }
     /**
      * @notice Return the configured issuer reference.
