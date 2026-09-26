@@ -49,7 +49,18 @@ contract IdentityRegistry {
      */
     function registerUser(bytes32 identityHash) external {
         // TODO: Implement the documented behavior. Never return a fake successful result.
-        revert NotImplemented();
+        if (identityHash == bytes32(0)) {
+            revert ZeroHash();
+        }
+        if (_users[msg.sender].registered) {
+            revert AlreadyRegistered();
+            }
+        _users[msg.sender] = UserInfo({
+            registered: true,
+            identityHash: identityHash,
+            vaccinationHash: bytes32(0)
+        });
+        emit UserRegistered(msg.sender, identityHash);
     }
     /**
      * @notice Attest one frozen local vaccination file for a registered guardian.
