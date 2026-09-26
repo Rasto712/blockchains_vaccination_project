@@ -12,6 +12,12 @@ pragma solidity 0.8.28;
  */
 contract IdentityRegistry {
     error NotImplemented();
+    error ZeroAddress();
+    error ZeroHash();
+    error AlreadyRegistered();
+    error NotRegistered();
+    error NotTrustedClinic();
+    error EvidenceAlreadyRegistered();
 
     // Planned storage; these declarations do not implement registration or authorization.
     struct UserInfo {
@@ -31,8 +37,10 @@ contract IdentityRegistry {
      * @param trustedClinic_ Nonzero clinic signer; validate and store during implementation.
      */
     constructor(address trustedClinic_) {
-        // TODO: Implement the documented behavior. Never return a fake successful result.
-        revert NotImplemented();
+        if (trustedClinic_ == address(0)) {
+            revert ZeroAddress();
+        }
+        _trustedClinic = trustedClinic_;
     }
     /**
      * @notice Register the caller once using a salted identity commitment.
@@ -70,7 +78,6 @@ contract IdentityRegistry {
      * @return clinic Trusted clinic signer address; not a private key.
      */
     function trustedClinic() external view returns (address clinic) {
-        // TODO: Implement the documented behavior. Never return a fake successful result.
-        revert NotImplemented();
+        return _trustedClinic;
     }
 }
