@@ -1,6 +1,6 @@
 # Validation and evidence
 
-Three Solidity suites exist under test/, named after their contracts. Every test method currently reverts TestNotImplemented. This is intentional: an empty passing test would misrepresent coverage. Developer 2 must implement meaningful Lab 3 setup and assertions. Constructors also remain unimplemented, so deployment workflows must not be reported as working.
+Three Solidity suites exist under test/, named after their contracts, with 34 implemented tests (IDs SOL-IR-01..08, SOL-CM-01..19, SOL-RT-01..07; see docs/FROM_DEV_2.md). They run against the real contracts, so tests that touch unimplemented IdentityRegistry/ConsentManager code fail with NotImplemented until Developer 1 finishes; that is the honest current state, not a test bug. `python -m evaluation.export_solidity_results` runs `npx hardhat test solidity` and writes the observed results to evaluation/results/solidity_test_results.csv. Deployment workflows must not be reported as working until the constructors are implemented.
 
 Compile commands require the Hardhat dependency and compiler download. Compiling the scaffold is separate from functional test success. Python compile/import/startup checks do not prove consent enforcement, storage or blockchain connectivity.
 
