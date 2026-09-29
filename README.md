@@ -13,7 +13,7 @@ A guardian keeps a child's vaccination card as a local file and decides who may 
 ## Prerequisites
 
 - Node.js 22.13 or newer, with npm.
-- Python 3.10 or newer. The macOS system `python3` is 3.9, which is too old.
+- Python 3.10 or newer.
 - Internet access for the first install.
 
 ## Quick start
