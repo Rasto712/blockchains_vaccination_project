@@ -2,8 +2,6 @@
 
 Local demo measurements: one machine, one local Hardhat node with automine, transactions sent one at a time. They are not public-chain throughput, latency or fee figures, and no gas is converted to ETH or money.
 
-Written by `python -m evaluation.measure --settings PATH` on 2026-09-29 07:48 UTC, at commit 39208bb. Uncommitted changes are looked for under contracts, app, scripts, evaluation/measure.py, hardhat.config.ts, package.json.
-
 ## Compiler
 
 - solc 0.8.28, optimiser on, 200 runs (hardhat.config.ts).

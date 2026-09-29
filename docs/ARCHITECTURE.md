@@ -1,65 +1,73 @@
 # Architecture
 
-A Python console and scripts use exactly three Solidity contracts on a local Hardhat node (chain ID 31337). Child data stays in local JSON; the chain holds only salted commitments and consent, audit and reward metadata.
-
-```mermaid
-flowchart TB
-    Actors[Guardian / clinic / school / doctor]
-    App[Python console]
-    Data[(Local JSON and private salts)]
-    Consent[ConsentManager.sol]
-    Registry[IdentityRegistry.sol]
-    Token[ConsentRewardToken.sol]
-    Actors --> App
-    App --> Data
-    App --> Consent
-    App --> Registry
-    App --> Token
-    Consent --> Registry
-    Consent --> Token
-```
-
-IdentityRegistry stores a hashed identity per account and one frozen vaccination commitment per guardian, attested by the one trusted clinic fixed at deployment. ConsentManager owns exact owner/requester/scope consent with expiry and revocation, the access events and lifetime reward deduplication. ConsentRewardToken keeps non-transferable units and lets only the configured manager mint. [CONTRACT_API.md](CONTRACT_API.md) has the functions, events, errors and rules.
+How the parts fit together, where data lives and how an access request works. Contract rules: [CONTRACT_API.md](CONTRACT_API.md).
 
 ## Components
 
-| Component | Role |
-| --- | --- |
-| app/main.py | Console menu: pick an actor (deployer, clinic, guardian, school or doctor), then setup, register, attest, grant, revoke, school check, doctor view, rewards, audit or show my registration. |
-| app/records.py | Local JSON files and their 32-byte salts under data_root (runtime-data/ by default). A commitment is SHA-256 of a purpose prefix, the salt and the exact file bytes. |
-| app/disclosure.py | The release rule below, and the two views: the school gets `{"measles_status": "verified"}`, the doctor gets vaccine and date for each vaccination. |
-| app/chain.py | The web3 boundary. Every contract call and transaction goes through it; it checks deployment.json against the node, decodes events and turns reverts into Solidity error names. |
-| app/models.py | Scope and Reason codes (the same as ConsentManager), shared types and exceptions. |
-| scripts/deploy_local.py | Deploys the three contracts in order, verifies each step and writes deployment.json. |
-| integration/demo_workflow.py | Deploys fresh contracts and runs the whole story on the node (register, attest, school, doctor, tamper, revoke, regrant, exact expiry, rewards, audit), checking every outcome. |
-| evaluation/ | measure.py writes the gas and timing tables; export_solidity_results.py and export_python_results.py write the SOL and PY test result rows. |
-
-## Disclosure
-
-Python is the trusted disclosure boundary (app/disclosure.py). For one request it reads the local record once and hashes that byte snapshot with its salt, then submits requestAccess, so the attempt is logged. It requires exactly one AccessAttempt from the manager in the receipt, with the expected owner, requester and scope. It then compares the snapshot hash with the registered commitment (getUserInfo), rechecks current permission (checkAccess) and returns only allowlisted fields from the same bytes. If the final recheck fails, it submits one more requestAccess so the late denial is logged, and releases nothing. If the local record or its salt cannot be read or validated, it sends a zero observedHash, so the attempt is still logged, and the outcome is unavailable, not a clinical result. Anyone with OS-level plaintext access can copy the file outside the app; this is a synthetic local demo, not production healthcare access control.
-
-```mermaid
-sequenceDiagram
-    actor Requester
-    participant Python
-    participant JSON as Local JSON
-    participant Manager as ConsentManager
-    participant Registry as IdentityRegistry
-    Requester->>Python: Request one scope
-    Python->>JSON: Read one byte snapshot plus salt
-    Python->>Python: Validate and hash
-    Python->>Manager: requestAccess(owner, scope, observedHash)
-    Manager->>Manager: Check scope
-    Manager->>Registry: getUserInfo(owner), getUserInfo(requester)
-    Manager->>Manager: Check registration, evidence, consent, revocation, expiry, then hash
-    Manager-->>Python: Committed allowed/denied event
-    Python->>Registry: getUserInfo(owner) and compare commitment
-    Python->>Manager: checkAccess(owner, requester, scope)
-    alt Every required check passes
-        Python-->>Requester: Permitted fields only
-    else Denied, unavailable or pending
-        Python-->>Requester: No health payload
-    end
+```text
+  deployer, clinic, guardian, school, doctor
+                     |
+                     v
+  Python console (app/)  <---->  local files:
+                     |           card, identities, salts
+                     |  web3
+                     v
+  +--------- local Hardhat node, chain ID 31337 ---------+
+  |  IdentityRegistry <--getUserInfo-- ConsentManager    |
+  |                                mintReward |          |
+  |                                           v          |
+  |                                  ConsentRewardToken  |
+  +------------------------------------------------------+
 ```
 
-A well-formed business denial returns false with an event, not a revert: requestAccess emits exactly one AccessAttempt per call, allowed or denied. Reverts are used for malformed or unauthorized transactions (for example NotTrustedClinic, InvalidDuration), which leave no event. Malformed transactions and RPC failures cannot create on-chain events. An event records authorization, not physical delivery. Revocation cannot retract data already disclosed.
+## Roles
+
+| Role | What it does |
+|---|---|
+| Deployer | Deploys the contracts; sets the token's minter once |
+| Clinic | Trusted issuer: attests the guardian's record (puts its commitment on-chain); never registers |
+| Guardian | Holds the child's card (the child has no wallet); registers, grants and revokes consent, earns rewards |
+| School | Registers; requests measles status (scope 1) |
+| Doctor | Registers; requests vaccination schedule (scope 2) |
+
+## Where the data lives
+
+The chain holds only **salted hash commitments**: a hash of a file plus a secret random value (the salt). It proves a file is unchanged without revealing it. Formula: [data/README.md](../data/README.md).
+
+| Where | What |
+|---|---|
+| Local files (private) | Card, identity files, one salt per file |
+| IdentityRegistry (public) | Identity commitment per account; frozen record commitment per guardian |
+| ConsentManager (public) | Consent per owner, requester and scope; AccessAttempt log |
+| ConsentRewardToken (public) | Reward balances |
+
+## Access flow
+
+Run by app/disclosure.py for each request:
+
+1. Python hashes the local card with its salt (a zero hash if either is missing).
+2. It calls `requestAccess(owner, scope, hash)` from the requester's wallet.
+3. ConsentManager checks the rules and the hash, then logs one AccessAttempt, allowed or denied.
+4. On a denial nothing is released; a missing card or salt shows as "unavailable", not a medical "no".
+5. Python rechecks the commitment and consent; if consent just ended, it logs a second denial and stops.
+6. It releases only that scope's fields: the school gets `{"measles_status": "verified"}`, the doctor each dose's vaccine and date.
+
+## Design decisions
+
+- **Only commitments on-chain:** the chain is public and permanent.
+- **Denials are logged, not reverted:** a revert would erase the audit record.
+- **Frozen records:** an attested commitment cannot be swapped, so card edits are caught.
+- **Narrow scopes:** the school learns a status, never dates.
+- **Python releases data:** contracts cannot keep secrets.
+- **Non-transferable rewards:** access never reads a balance.
+- **One storage slot per consent:** about 20,000 gas less per revoke or first grant (SOL-CM-21).
+
+## Limitations
+
+- Local demo, synthetic data only.
+- Anyone with file access can copy the card outside the app.
+- An AccessAttempt proves permission, not delivery. Revoking cannot recall released data.
+- Registration proves no real identity; one person can hold many wallets (SOL-IR-09).
+- Reward farming: k wallets can mint 2 × k² units by granting each other (SOL-CM-22).
+- One fixed clinic; an attested record cannot be corrected.
+- Consent names a wallet, not an organization.
