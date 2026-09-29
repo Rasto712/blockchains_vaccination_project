@@ -10,7 +10,7 @@ The recorded results are already in evaluation/results/; rerunning a command ove
 |---|---|---|---|
 | Solidity tests | `npx hardhat test solidity` | - | 38 passing |
 | Solidity tests, saved | `python -m evaluation.export_solidity_results` | solidity_test_results.csv, solidity_test_run.log | 38 rows, all pass |
-| Python unit tests | `python -m unittest discover -s tests` | - | 337 tests, OK |
+| Python unit tests | `python -m unittest discover -s tests` | - | 401 tests, OK |
 | Scripted demo | `python -m integration.demo_workflow` | - | `demo passed` ([DEMO.md](DEMO.md)) |
 | Python checks, saved | `python -m evaluation.export_python_results` | test_results.csv | 13 rows, all pass |
 | Gas and timing | `python -m evaluation.measure` | gas_results.csv, timing_results.csv, timing_summary.csv, ENVIRONMENT.md | 17, 61 and 116 transactions for 1, 5 and 10 requesters; 0 failed |

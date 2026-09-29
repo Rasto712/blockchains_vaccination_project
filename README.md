@@ -56,6 +56,14 @@ Run every command from the project root; start Python with `-m` as shown.
 
    Pick an actor, then a numbered action. [DEMO.md](docs/DEMO.md) gives the order to try them in.
 
+5. Or use the web UI, with the node still running:
+
+   ```bash
+   python -m ui.server
+   ```
+
+   Open http://127.0.0.1:8000/, pick a role, or press **Guided demo** to play the scripted demo one click per step.
+
 ## Documentation
 
 Reading order:
@@ -77,6 +85,7 @@ app/           Python console (main.py) and its modules
 tests/         Python unit tests
 scripts/       deploy_local.py: deploys the contracts
 integration/   demo_workflow.py: the scripted demo
+ui/            web UI: python -m ui.server serves it on 127.0.0.1
 evaluation/    measurement and export scripts; results/ holds the recorded results
 config/        settings.example.json (copy to settings.json)
 data/          synthetic example card and identities

@@ -36,4 +36,4 @@ python -m scripts.deploy_local --reset
 python -m app.main
 ```
 
-Pick an actor, then try these actions in order: 1 setup; 2 register as guardian, school and doctor; 3 attest as clinic; 4 grant as guardian (school, then doctor); 6 school check; 7 doctor view; 5 revoke; 8 rewards; 9 audit. Tamper and exact expiry are script-only.
+Pick an actor, then try these actions in order: 1 setup; 2 register as guardian, school and doctor; 3 attest as clinic; 4 grant as guardian (school, then doctor); 6 school check; 7 doctor view; 5 revoke; 8 rewards; 9 audit. Tamper and exact expiry run in the script and in the web UI (`python -m ui.server`), whose guided demo plays this story one click per step.

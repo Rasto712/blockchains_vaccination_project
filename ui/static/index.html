@@ -1,0 +1,39 @@
+<!doctype html>
+<!-- AI assistance: parts of this file were written with Claude (Anthropic) and thoroughly reviewed. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>My Vaccination Card</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/app.js" defer></script>
+  <script src="/static/demo.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-row">
+      <div class="brand">
+        <span class="brand-name">My Vaccination Card</span>
+        <span class="brand-tag">local Hardhat demo · demo mode, not a real sign-in</span>
+      </div>
+      <div id="node-status" class="node-status" role="status" aria-live="polite"></div>
+    </div>
+    <div class="topbar-row">
+      <div class="topbar-left">
+        <nav id="roles" class="roles" aria-label="Act as"></nav>
+        <div id="demo-toggle"></div>
+      </div>
+      <div id="acting" class="acting"></div>
+    </div>
+  </header>
+  <main class="layout">
+    <div class="primary">
+      <div id="demo"></div>
+      <div id="setup"></div>
+      <div id="view"></div>
+    </div>
+    <aside id="audit" class="audit" aria-label="Audit timeline"></aside>
+  </main>
+  <noscript>This page needs JavaScript.</noscript>
+</body>
+</html>

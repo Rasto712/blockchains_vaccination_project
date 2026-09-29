@@ -4,20 +4,32 @@ How the parts fit together, where data lives and how an access request works. Co
 
 ## Components
 
-```text
-  deployer, clinic, guardian, school, doctor
-                     |
-                     v
-  Python console (app/)  <---->  local files:
-                     |           card, identities, salts
-                     |  web3
-                     v
-  +--------- local Hardhat node, chain ID 31337 ---------+
-  |  IdentityRegistry <--getUserInfo-- ConsentManager    |
-  |                                mintReward |          |
-  |                                           v          |
-  |                                  ConsentRewardToken  |
-  +------------------------------------------------------+
+```mermaid
+flowchart TB
+    actors["Deployer · Clinic · Guardian · School · Doctor<br/>(unlocked Hardhat demo accounts)"]
+
+    subgraph python["Python"]
+        console["Console<br/>python -m app.main"]
+        webui["Web UI<br/>python -m ui.server"]
+        core["disclosure.py · records.py · chain.py"]
+    end
+
+    files[("Local files, private<br/>card · identities · salts")]
+
+    subgraph hardhat["Local Hardhat node · chain ID 31337"]
+        registry["IdentityRegistry<br/>identity and record commitments"]
+        manager["ConsentManager<br/>consent and the AccessAttempt log"]
+        token["ConsentRewardToken<br/>reward balances"]
+    end
+
+    actors --> console
+    actors --> webui
+    console --> core
+    webui --> core
+    core <--> files
+    core -->|"web3: only hashes, consent and audit data"| hardhat
+    manager -->|getUserInfo| registry
+    manager -->|mintReward| token
 ```
 
 ## Roles
