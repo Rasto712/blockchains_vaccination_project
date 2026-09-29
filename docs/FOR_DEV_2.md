@@ -1,10 +1,12 @@
 # For Dev 2
 
+Status (2026-09-28): answered in [FROM_DEV_2.md](FROM_DEV_2.md). Every test asked for below exists, all 38 Solidity tests pass against the implemented contracts, and `python -m evaluation.export_solidity_results` writes the SOL rows to `evaluation/results/solidity_test_results.csv`. On 2026-09-28 I completed the remaining parts with AI assistance, including the review fixes to the token, the tests and the exporter. The rest of this note is kept as written, with its counts and status updated.
+
 What the Python side needs from `contracts/ConsentRewardToken.sol` and the Solidity tests, and what I need from you. Read this next to [tasks/DEV_2.md](tasks/DEV_2.md) and [CONTRACT_API.md](CONTRACT_API.md). Miki's note is [FOR_DEV_1.md](FOR_DEV_1.md), Rasto's is [FOR_DEV_4.md](FOR_DEV_4.md) and Ahmed's is [FOR_DEV_5.md](FOR_DEV_5.md).
 
 ## Where things stand
 
-The Python side is done: the local record, salts and commitments, the release rule, the school and doctor views, the menu and the tamper demo. It has 106 unit tests and none of them needs a node: the ones that touch the chain use a fake in `tests/fake_chain.py`, because there is no working contract yet. The fake has no token, so nothing on my side checks rewards until the first real run. Your suite is the only place the real contracts get checked before then.
+The Python side is done: the local record, salts and commitments, the release rule, the school and doctor views, the menu and the tamper demo. It has 337 unit tests and none of them needs a node: the ones that touch the chain use a fake in `tests/fake_chain.py` or mock web3. The fake has no token contract, only a plain reward count that the menu tests read, so on my side real rewards are checked on the node (the menu and `python -m integration.demo_workflow`, which checks the 0 -> 1 -> 2 -> 2 balances). Your suite is the only place the real contracts get checked in isolation.
 
 ## Rewards
 
@@ -39,6 +41,6 @@ Your Solidity rows and my Python rows (about eight) go under one header: `test_i
 - `status` is pass or fail only, and `evidence` names the suite and function plus the command and commit of the run
 - rows are only added after a real run, so a missing row means not run
 - on-chain rules (denial order, hash comparison, rewards, minter) are SOL rows; off-chain checks (commitment and byte flips, no-leak, zero hash shown as unavailable) are PY rows
-- the filled file probably lives at `evaluation/results/test_results.csv`, since the templates keep headers only (Rasto owns `evaluation/`, and Ahmed reads it)
+- the filled rows live in two files under the same header: yours in `evaluation/results/solidity_test_results.csv` (written by `python -m evaluation.export_solidity_results`) and mine in `evaluation/results/test_results.csv`; the templates keep headers only, and the report reads both
 
 Please share the final list of test functions and ids once it stops changing, so the ids stay stable when the report cites them.

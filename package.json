@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Three-contract local Hardhat scaffold; business methods and tests are unimplemented.",
+  "description": "My Vaccination Card: IdentityRegistry, ConsentManager and a non-transferable ConsentRewardToken on a local Hardhat node, with Solidity tests.",
   "scripts": {
     "compile": "hardhat compile",
     "test": "hardhat test solidity",

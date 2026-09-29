@@ -1,5 +1,7 @@
 # Developer 2: Reward token and Solidity unit tests
 
+Status (2026-09-28): done. 38 Solidity tests pass; results in evaluation/results/solidity_test_results.csv ([FROM_DEV_2.md](../FROM_DEV_2.md)).
+
 ## Files
 
 contracts/ConsentRewardToken.sol; test/IdentityRegistry.t.sol; test/ConsentManager.t.sol; test/ConsentRewardToken.t.sol. Use the lab's test-folder convention if different.

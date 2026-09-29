@@ -1,1 +1,1 @@
-"""Real-transaction workflow outlines. This package performs no work on import."""
+"""Real-transaction demo workflow. This package performs no work on import."""

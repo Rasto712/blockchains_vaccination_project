@@ -1,5 +1,5 @@
+# AI assistance: parts of this file were written with Claude (Anthropic) and thoroughly reviewed.
 """Shared test set-up: a temporary runtime folder with settings that point into it.
-AI note: parts of this file were written with help from Claude and checked by hand.
 """
 import tempfile
 from pathlib import Path

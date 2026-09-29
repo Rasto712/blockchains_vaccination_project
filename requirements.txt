@@ -1,2 +1,3 @@
-# Python 3.10 or newer (web3 8 requires it). app.main itself needs only the standard library.
+# Python 3.10 or newer: the code uses 3.10 syntax and web3 8 needs 3.10 too. Without web3 the menu's
+# setup and "show my registration" still work; every chain action needs it.
 web3==8.0.0

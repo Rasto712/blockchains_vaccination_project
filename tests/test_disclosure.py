@@ -1,5 +1,5 @@
+# AI assistance: parts of this file were written with Claude (Anthropic) and thoroughly reviewed.
 """Tests for the disclosure views and denial messages in app/disclosure.py.
-AI note: parts of this file were written with help from Claude and checked by hand.
 """
 import copy
 import unittest
@@ -77,7 +77,7 @@ class FormatDenialTests(unittest.TestCase):
             disclosure.format_denial(OUTCOME_DENIED, 8, TX_HASH)
 
     def test_allowed_and_unknown_values_are_refused(self):
-        for outcome, reason in ((OUTCOME_ALLOWED, ""), ("unimplemented", ""), (OUTCOME_DENIED, "revoked"), (OUTCOME_DENIED, "7")):
+        for outcome, reason in ((OUTCOME_ALLOWED, ""), ("unknown", ""), (OUTCOME_DENIED, "revoked"), (OUTCOME_DENIED, "7")):
             with self.subTest(outcome=outcome, reason=reason):
                 with self.assertRaises(ValueError):
                     disclosure.format_denial(outcome, reason)
@@ -98,6 +98,11 @@ class DenialMessageTests(unittest.TestCase):
                     "unavailable: local record could not be verified, not a clinical result",
                 )
 
+    def test_unavailable_with_nothing_logged_blames_the_node_not_the_record(self):
+        # a node, receipt or event failure: no request was confirmed, so the local record was never judged
+        response = disclosure.format_denial(OUTCOME_UNAVAILABLE)
+        self.assertEqual(disclosure.denial_message(response), "unavailable: local node or receipt problem, nothing released")
+
     def test_pending(self):
         response = disclosure.format_denial(OUTCOME_PENDING)
         self.assertEqual(disclosure.denial_message(response), "pending: not confirmed, nothing released")
@@ -108,7 +113,7 @@ class DenialMessageTests(unittest.TestCase):
             disclosure.denial_message(allowed)
 
     def test_not_implemented_is_a_message_not_an_outcome(self):
-        self.assertEqual(disclosure.NOT_IMPLEMENTED_MESSAGE, "not implemented yet")
+        self.assertEqual(disclosure.NOT_IMPLEMENTED_MESSAGE, "not implemented")
         with self.assertRaises(ValueError):
             disclosure.format_denial(disclosure.NOT_IMPLEMENTED_MESSAGE)
 

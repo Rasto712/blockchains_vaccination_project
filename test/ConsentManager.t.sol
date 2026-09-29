@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: UNLICENSED
+// AI assistance: parts of this file were written with Claude (Anthropic) and thoroughly reviewed.
 pragma solidity 0.8.28;
 
 import {Test} from "forge-std/Test.sol";
@@ -9,14 +10,13 @@ import {ConsentRewardToken} from "../contracts/ConsentRewardToken.sol";
 
 /**
  * @title ConsentManagerTest
- * @notice Developer 2: Solidity unit tests for ConsentManager, wired to a real IdentityRegistry and ConsentRewardToken.
- * @dev Test IDs SOL-CM-01..19 are stable; the report and evaluation/results/test_results.csv cite them.
+ * @notice Solidity unit tests for ConsentManager, wired to a real IdentityRegistry and ConsentRewardToken.
+ * @dev Test IDs SOL-CM-01..22 are stable; evaluation/results/solidity_test_results.csv
+ *      (written by evaluation/export_solidity_results.py) cites them.
  *      Business denials are asserted through the emitted AccessAttempt event (what Python reads), never
  *      through a revert. Reason codes are compared as literal numbers 0-7 so a reordered enum fails here.
- *      Custom-error selectors are computed from their signature strings (the names agreed in
- *      docs/CONTRACT_API.md), so this file compiles before Developer 1 declares every error, and it
- *      fails loudly if a name drifts.
- *      AI assistance: drafted with Claude (Anthropic) and reviewed by Developer 2.
+ *      Custom errors are referenced as ConsentManager.<Name>.selector (the names in
+ *      docs/CONTRACT_API.md), so renaming or dropping one breaks compilation instead of passing silently.
  */
 contract ConsentManagerTest is Test {
     IdentityRegistry internal registry;
@@ -57,6 +57,7 @@ contract ConsentManagerTest is Test {
 
     bytes32 internal constant ACCESS_ATTEMPT_TOPIC =
         keccak256("AccessAttempt(address,address,uint8,uint256,bool,uint8)");
+    bytes32 internal constant CONSENT_GRANTED_TOPIC = keccak256("ConsentGranted(address,address,uint8,uint256)");
     bytes32 internal constant CONSENT_REVOKED_TOPIC = keccak256("ConsentRevoked(address,address,uint8)");
     bytes32 internal constant REWARD_MINTED_TOPIC = keccak256("RewardMinted(address,uint256)");
 
@@ -82,10 +83,6 @@ contract ConsentManagerTest is Test {
     }
 
     // ------------------------------------------------------------------ helpers
-
-    function _err(string memory signature) internal pure returns (bytes4) {
-        return bytes4(keccak256(bytes(signature)));
-    }
 
     function _register(address account, string memory label) internal {
         vm.prank(account);
@@ -121,7 +118,10 @@ contract ConsentManagerTest is Test {
 
         uint256 found;
         for (uint256 i = 0; i < logs.length; i++) {
-            if (logs[i].emitter == address(manager) && logs[i].topics[0] == ACCESS_ATTEMPT_TOPIC) {
+            if (
+                logs[i].emitter == address(manager) && logs[i].topics.length > 0
+                    && logs[i].topics[0] == ACCESS_ATTEMPT_TOPIC
+            ) {
                 found++;
                 assertEq(logs[i].topics[1], bytes32(uint256(uint160(owner))), "event owner = owner as passed");
                 assertEq(logs[i].topics[2], bytes32(uint256(uint160(requester))), "event requester = msg.sender");
@@ -147,6 +147,17 @@ contract ConsentManagerTest is Test {
     function _countLogs(Vm.Log[] memory logs, address emitter, bytes32 topic0) internal pure returns (uint256 n) {
         for (uint256 i = 0; i < logs.length; i++) {
             if (logs[i].emitter == emitter && logs[i].topics.length > 0 && logs[i].topics[0] == topic0) n++;
+        }
+    }
+
+    /// @dev Returns the one manager storage slot written since the last vm.record(); fails if the action wrote
+    ///      no slot or more than one distinct slot.
+    function _onlyWrittenSlot(string memory action) internal view returns (bytes32 slot) {
+        (, bytes32[] memory writes) = vm.accesses(address(manager));
+        assertGt(writes.length, 0, string.concat(action, " writes storage"));
+        slot = writes[0];
+        for (uint256 i = 1; i < writes.length; i++) {
+            assertEq(writes[i], slot, string.concat(action, " writes one slot only"));
         }
     }
 
@@ -186,7 +197,7 @@ contract ConsentManagerTest is Test {
         uint16[3] memory bad = [uint16(0), 366, type(uint16).max];
         for (uint256 i = 0; i < bad.length; i++) {
             vm.prank(guardian);
-            vm.expectRevert(_err("InvalidDuration()"));
+            vm.expectRevert(ConsentManager.InvalidDuration.selector);
             manager.grantConsent(school, MEASLES_STATUS, bad[i]);
         }
         assertEq(_expiry(guardian, school, MEASLES_STATUS), 0, "rejected grants leave no state");
@@ -210,12 +221,12 @@ contract ConsentManagerTest is Test {
         uint256 expiresAt = _expiry(guardian, school, MEASLES_STATUS);
 
         vm.prank(guardian);
-        vm.expectRevert(_err("ConsentStillActive()"));
+        vm.expectRevert(ConsentManager.ConsentStillActive.selector);
         manager.grantConsent(school, MEASLES_STATUS, 365);
 
         vm.warp(expiresAt - 1);
         vm.prank(guardian);
-        vm.expectRevert(_err("ConsentStillActive()"));
+        vm.expectRevert(ConsentManager.ConsentStillActive.selector);
         manager.grantConsent(school, MEASLES_STATUS, 1);
 
         assertEq(_expiry(guardian, school, MEASLES_STATUS), expiresAt, "expiry unchanged");
@@ -234,7 +245,7 @@ contract ConsentManagerTest is Test {
         address[3] memory others = [guardian2, school, stranger];
         for (uint256 i = 0; i < others.length; i++) {
             vm.prank(others[i]);
-            vm.expectRevert(_err("NoConsentToRevoke()"));
+            vm.expectRevert(ConsentManager.NoConsentToRevoke.selector);
             manager.revokeConsent(school, MEASLES_STATUS);
         }
 
@@ -252,36 +263,42 @@ contract ConsentManagerTest is Test {
         assertEq(reason, REVOKED, "guardian2's own grant revoked");
     }
 
-    /// @notice [SOL-CM-05] Grants need both parties registered and a supported scope.
-    /// @dev Why it matters: consent must name a real, registered requester; granting to an unregistered address or an unknown scope is a user error, not a grant.
+    /// @notice [SOL-CM-05] Grants need both parties registered and a supported scope, and nothing more: a guardian may name its own wallet as requester.
+    /// @dev Why it matters: consent must name a real, registered requester; granting to an unregistered address or an unknown scope is a user error, not a grant. Any extra precondition would make the real contract drift from Python's fake chain unnoticed.
     /// @custom:requirement Consent: a grant needs registered parties and a supported scope
     function testGrantRequiresRegisteredPartiesAndSupportedScope() public {
         vm.prank(guardian);
-        vm.expectRevert(_err("NotRegistered()"));
+        vm.expectRevert(ConsentManager.NotRegistered.selector);
         manager.grantConsent(stranger, MEASLES_STATUS, 30);
 
         vm.prank(stranger);
-        vm.expectRevert(_err("NotRegistered()"));
+        vm.expectRevert(ConsentManager.NotRegistered.selector);
         manager.grantConsent(school, MEASLES_STATUS, 30);
 
         vm.prank(guardian);
-        vm.expectRevert(_err("UnsupportedScope()"));
+        vm.expectRevert(ConsentManager.UnsupportedScope.selector);
         manager.grantConsent(school, UNSUPPORTED, 30);
 
         vm.prank(guardian);
-        vm.expectRevert(_err("UnsupportedScope()"));
+        vm.expectRevert(ConsentManager.UnsupportedScope.selector);
         manager.grantConsent(school, 0, 30);
 
         vm.prank(guardian);
-        vm.expectRevert(_err("UnsupportedScope()"));
+        vm.expectRevert(ConsentManager.UnsupportedScope.selector);
         manager.revokeConsent(school, UNSUPPORTED);
 
         assertEq(token.totalSupply(), 0, "no rewards from rejected grants");
+
+        // No owner != requester check (docs/CONTRACT_API.md, tests/fake_chain.py): a self-grant is accepted.
+        _grant(guardian, guardian, MEASLES_STATUS, 30);
+        (bool allowed, uint8 reason) = _check(guardian, guardian, MEASLES_STATUS);
+        assertTrue(allowed, "self-grant accepted");
+        assertEq(reason, ALLOWED);
     }
 
     // ------------------------------------------------------------------ access denials
 
-    /// @notice [SOL-CM-06] Wrong requester, wrong scope and unsupported scope give a false result and a persistent denied AccessAttempt (no revert); the raw scope 3 is logged.
+    /// @notice [SOL-CM-06] Wrong requester, wrong scope and unsupported scopes (0, 3 and 255) give a false result and a persistent denied AccessAttempt (no revert); the raw scope 3 is logged, and checkAccess agrees for scope 0.
     /// @dev Why it matters: consent is for an exact requester and scope; the audit log must record denied attempts, including the raw scope the audit view prints.
     /// @custom:requirement Consent/Audit: exact requester and scope; denied attempts are logged
     function testWrongRequesterAndUnsupportedScopeAreLoggedDenied() public {
@@ -304,6 +321,14 @@ contract ConsentManagerTest is Test {
 
         (allowed, reason) = _request(school, guardian, type(uint8).max, RECORD);
         assertEq(reason, UNSUPPORTED_SCOPE, "scope 255 is also a logged denial");
+
+        // Scope 0 lies below the supported range, so a check written as `scope > 2` would miss it.
+        (allowed, reason) = _request(school, guardian, 0, RECORD);
+        assertFalse(allowed);
+        assertEq(reason, UNSUPPORTED_SCOPE, "scope 0 is a logged denial, not NoConsent");
+        (allowed, reason) = _check(guardian, school, 0);
+        assertFalse(allowed);
+        assertEq(reason, UNSUPPORTED_SCOPE, "checkAccess agrees: scope 0");
     }
 
     /// @notice [SOL-CM-07] Each missing prerequisite (unregistered requester, unregistered owner, owner without evidence) creates a denied event and no token movement.
@@ -320,6 +345,9 @@ contract ConsentManagerTest is Test {
         (allowed, reason) = _request(school, stranger, MEASLES_STATUS, RECORD);
         assertFalse(allowed);
         assertEq(reason, NOT_REGISTERED, "unregistered owner");
+        (allowed, reason) = _check(stranger, school, MEASLES_STATUS);
+        assertFalse(allowed);
+        assertEq(reason, NOT_REGISTERED, "checkAccess agrees: unregistered owner");
 
         // The school is registered but has no attested vaccination record.
         (allowed, reason) = _request(doctor, school, MEASLES_STATUS, RECORD);
@@ -381,7 +409,7 @@ contract ConsentManagerTest is Test {
 
         // Never granted.
         vm.prank(guardian);
-        vm.expectRevert(_err("NoConsentToRevoke()"));
+        vm.expectRevert(ConsentManager.NoConsentToRevoke.selector);
         manager.revokeConsent(doctor, VACCINATION_SCHEDULE);
 
         // Expired but not revoked: revoke still records it.
@@ -447,7 +475,7 @@ contract ConsentManagerTest is Test {
 
     // ------------------------------------------------------------------ rewards
 
-    /// @notice [SOL-CM-12] Grant, revoke and regrant: checkAccess is Allowed, getConsent shows revoked == false and a new expiry, and the tuple keeps exactly one lifetime reward.
+    /// @notice [SOL-CM-12] Grant, revoke and regrant: the regrant emits ConsentGranted with the new expiry, checkAccess is Allowed, getConsent shows revoked == false and a new expiry, and the tuple keeps exactly one lifetime reward.
     /// @dev Why it matters: toggling consent must not farm rewards, and a regrant must fully clear the revoked flag (the demo's final EXPIRED step depends on it).
     /// @custom:requirement Rewards: revoke and regrant gives no second reward
     function testRegrantDoesNotRepeatReward() public {
@@ -455,9 +483,12 @@ contract ConsentManagerTest is Test {
         _revoke(guardian, school, MEASLES_STATUS);
         vm.warp(block.timestamp + 1 hours);
 
+        vm.expectEmit(true, true, true, true, address(manager));
+        emit ConsentGranted(guardian, school, MEASLES_STATUS, block.timestamp + 1 days);
         vm.recordLogs();
         _grant(guardian, school, MEASLES_STATUS, 1);
         Vm.Log[] memory logs = vm.getRecordedLogs();
+        assertEq(_countLogs(logs, address(manager), CONSENT_GRANTED_TOPIC), 1, "every grant emits ConsentGranted once");
 
         (uint256 expiresAt, bool revoked) = manager.getConsent(guardian, school, MEASLES_STATUS);
         assertFalse(revoked, "regrant clears revoked");
@@ -472,7 +503,7 @@ contract ConsentManagerTest is Test {
         assertEq(token.totalSupply(), 1);
     }
 
-    /// @notice [SOL-CM-13] Grant, let it expire, regrant: allowed again, but no second reward.
+    /// @notice [SOL-CM-13] Grant, let it expire, regrant: ConsentGranted carries the new expiry, access is allowed again, but no second reward.
     /// @dev Why it matters: expiry is the other way a tuple becomes re-grantable; it must follow the same one-lifetime-reward rule as revocation.
     /// @custom:requirement Rewards: expiry and regrant gives no second reward
     function testExpiryRegrantDoesNotRepeatReward() public {
@@ -481,23 +512,30 @@ contract ConsentManagerTest is Test {
         (, uint8 reason) = _check(guardian, doctor, VACCINATION_SCHEDULE);
         assertEq(reason, EXPIRED);
 
+        vm.expectEmit(true, true, true, true, address(manager));
+        emit ConsentGranted(guardian, doctor, VACCINATION_SCHEDULE, block.timestamp + 7 days);
         _grant(guardian, doctor, VACCINATION_SCHEDULE, 7);
+        assertEq(_expiry(guardian, doctor, VACCINATION_SCHEDULE), block.timestamp + 7 days, "new expiry stored");
         (bool allowed,) = _check(guardian, doctor, VACCINATION_SCHEDULE);
         assertTrue(allowed, "regranted after expiry");
         assertEq(token.balanceOf(guardian), 1, "still one reward");
         assertEq(token.totalSupply(), 1);
     }
 
-    /// @notice [SOL-CM-14] A different requester or scope for the same owner, or a different owner, earns its own single reward (the key is the full tuple).
+    /// @notice [SOL-CM-14] A different requester or scope for the same owner, or a different owner, earns its own single reward (the key is the full tuple); hasReceivedReward tracks scope-2 tuples as well as scope-1 ones.
     /// @dev Why it matters: shows the reward key is (owner, requester, scope), matching the demo balances: school 0 -> 1, doctor 1 -> 2.
     /// @custom:requirement Rewards: one lifetime reward per (owner, requester, scope)
     function testDifferentRequesterOrScopeEarnsOwnReward() public {
         _grant(guardian, school, MEASLES_STATUS, 30);
         assertEq(token.balanceOf(guardian), 1, "demo: school grant 0 -> 1");
+        assertFalse(manager.hasReceivedReward(guardian, doctor, VACCINATION_SCHEDULE), "scope 2 before its grant");
         _grant(guardian, doctor, VACCINATION_SCHEDULE, 30);
         assertEq(token.balanceOf(guardian), 2, "demo: doctor grant 1 -> 2");
+        assertTrue(manager.hasReceivedReward(guardian, doctor, VACCINATION_SCHEDULE), "scope 2 after its grant");
+        assertFalse(manager.hasReceivedReward(guardian, school, VACCINATION_SCHEDULE), "same requester, scope 2 not granted yet");
         _grant(guardian, school, VACCINATION_SCHEDULE, 30);
         assertEq(token.balanceOf(guardian), 3, "same requester, other scope");
+        assertTrue(manager.hasReceivedReward(guardian, school, VACCINATION_SCHEDULE));
         _grant(guardian2, school, MEASLES_STATUS, 30);
         assertEq(token.balanceOf(guardian2), 1, "other owner, same requester and scope");
 
@@ -506,10 +544,11 @@ contract ConsentManagerTest is Test {
         assertEq(token.balanceOf(doctor), 0, "requesters never rewarded");
         assertEq(token.totalSupply(), 4);
         assertFalse(manager.hasReceivedReward(guardian, doctor, MEASLES_STATUS), "untouched tuple not rewarded");
+        assertFalse(manager.hasReceivedReward(guardian2, doctor, VACCINATION_SCHEDULE), "untouched scope-2 tuple not rewarded");
     }
 
-    /// @notice [SOL-CM-15] With an unconfigured reward token, the grant reverts as a whole: no consent, no rewarded flag, access still NoConsent.
-    /// @dev Why it matters: grant and reward are one atomic transaction; a failed mint must not leave a half-done grant that looks successful.
+    /// @notice [SOL-CM-15] With an unconfigured reward token, the grant reverts as a whole with the token's own NotMinter error (bubbled up unchanged, so the menu names the misconfiguration): no consent, no rewarded flag, access still NoConsent.
+    /// @dev Why it matters: grant and reward are one atomic transaction; a failed mint must not leave a half-done grant that looks successful, and a try/catch that swallows the failure would fail here.
     /// @custom:requirement Rewards: grant and mint are atomic
     function testRewardFailureRollsBackGrant() public {
         ConsentRewardToken unconfigured = new ConsentRewardToken(); // setMinterOnce never called
@@ -519,6 +558,8 @@ contract ConsentManagerTest is Test {
         vm.expectRevert(ConsentRewardToken.NotMinter.selector);
         manager2.grantConsent(school, MEASLES_STATUS, 30);
 
+        // The checks below restate what the revert already guarantees (the EVM undid the whole call);
+        // they document the atomicity for readers rather than add checking power.
         (uint256 expiresAt, bool revoked) = manager2.getConsent(guardian, school, MEASLES_STATUS);
         assertEq(expiresAt, 0, "no consent stored");
         assertFalse(revoked);
@@ -531,8 +572,8 @@ contract ConsentManagerTest is Test {
 
     // ------------------------------------------------------------------ frozen interface
 
-    /// @notice [SOL-CM-16] Denial precedence: several failing conditions at once always yield the agreed reason, in the event and in checkAccess.
-    /// @dev Why it matters: Python's fake chain and messages assume this exact order (UnsupportedScope, NotRegistered, MissingEvidence, NoConsent, Revoked, Expired, then hash); this is the only test that pins it on the real contract.
+    /// @notice [SOL-CM-16] Denial precedence: several failing conditions at once always yield the documented reason, in the event and in checkAccess; a wrong or zero observedHash never replaces an earlier denial (NoConsent, MissingEvidence, Revoked, Expired).
+    /// @dev Why it matters: Python's fake chain and messages assume this exact order (UnsupportedScope, NotRegistered, MissingEvidence, NoConsent, Revoked, Expired, then hash); this is the only test that pins it on the real contract, and the audit view prints the logged reason.
     /// @custom:requirement Interface: denial precedence matches Python
     function testDenialPrecedence() public {
         bool allowed;
@@ -577,6 +618,22 @@ contract ConsentManagerTest is Test {
         (allowed, reason) = _request(doctor, guardian, VACCINATION_SCHEDULE, TAMPERED);
         assertFalse(allowed, "(f) requestAccess denied");
         assertEq(reason, HASH_MISMATCH, "(f) requestAccess");
+
+        // (g) revoked (not expired) + wrong or zero observedHash -> Revoked, not HashMismatch.
+        _grant(guardian, doctor, MEASLES_STATUS, 30);
+        _revoke(guardian, doctor, MEASLES_STATUS);
+        (, reason) = _request(doctor, guardian, MEASLES_STATUS, TAMPERED);
+        assertEq(reason, REVOKED, "(g) revoked beats a tampered hash");
+        (, reason) = _request(doctor, guardian, MEASLES_STATUS, bytes32(0));
+        assertEq(reason, REVOKED, "(g) revoked beats a zero hash");
+
+        // (h) expired (not revoked) + wrong or zero observedHash -> Expired, not HashMismatch.
+        _grant(guardian, school, VACCINATION_SCHEDULE, 1);
+        vm.warp(_expiry(guardian, school, VACCINATION_SCHEDULE));
+        (, reason) = _request(school, guardian, VACCINATION_SCHEDULE, TAMPERED);
+        assertEq(reason, EXPIRED, "(h) expired beats a tampered hash");
+        (, reason) = _request(school, guardian, VACCINATION_SCHEDULE, bytes32(0));
+        assertEq(reason, EXPIRED, "(h) expired beats a zero hash");
     }
 
     /// @notice [SOL-CM-17] The Reason enum values are frozen at 0-7 in the order app/models.py uses.
@@ -593,32 +650,38 @@ contract ConsentManagerTest is Test {
         assertEq(uint8(ConsentManager.Reason.HashMismatch), 7);
     }
 
-    /// @notice [SOL-CM-18] The constructor rejects zero and non-contract dependency addresses.
+    /// @notice [SOL-CM-18] The constructor rejects zero and non-contract dependency addresses; a zero address is reported before a wallet (ZeroAddress, then NotAContract).
     /// @dev Why it matters: a manager wired to a wallet instead of the real registry or token would accept or deny access on garbage data.
     /// @custom:requirement Deployment: the manager is wired to real contracts
     function testConstructorRejectsInvalidDependencies() public {
-        vm.expectRevert(_err("ZeroAddress()"));
+        vm.expectRevert(ConsentManager.ZeroAddress.selector);
         new ConsentManager(address(0), address(token));
 
-        vm.expectRevert(_err("ZeroAddress()"));
+        vm.expectRevert(ConsentManager.ZeroAddress.selector);
         new ConsentManager(address(registry), address(0));
 
-        vm.expectRevert(_err("NotAContract()"));
+        vm.expectRevert(ConsentManager.NotAContract.selector);
         new ConsentManager(guardian, address(token));
 
-        vm.expectRevert(_err("NotAContract()"));
+        vm.expectRevert(ConsentManager.NotAContract.selector);
         new ConsentManager(address(registry), guardian);
+
+        // A wallet AND a zero address: ZeroAddress comes first, whichever argument is zero.
+        vm.expectRevert(ConsentManager.ZeroAddress.selector);
+        new ConsentManager(guardian, address(0));
+        vm.expectRevert(ConsentManager.ZeroAddress.selector);
+        new ConsentManager(address(0), guardian);
     }
 
-    /// @notice [SOL-CM-19] The full demo storyline on-chain: deny, grant/reward, allow, revoke deny, tamper deny, regrant 1 day (no reward), exact expiry deny.
-    /// @dev Why it matters: shows the unit-tested rules compose into the scripted demonstration in the same order integration/demo_workflow.py runs it.
+    /// @notice [SOL-CM-19] The full demo storyline on-chain in docs/DEMO.md order: deny, grant/reward, allow, doctor grant, tamper deny while the doctor grant is active (original still verifies), revoke deny, regrant 1 day (no reward), exact expiry deny.
+    /// @dev Why it matters: shows the unit-tested rules compose into the scripted demonstration, in the step order of docs/DEMO.md (steps 2-7) and of integration/demo_workflow.py. The allowed requests after the tamper and after the regrant are extra checks here; the demo checks the original locally and does not request before expiry.
     /// @custom:requirement Full workflow: the demo storyline works on-chain
     function testDemoStorylineEndToEnd() public {
         (bool allowed, uint8 reason) = _request(school, guardian, MEASLES_STATUS, RECORD);
-        assertEq(reason, NO_CONSENT, "1. school before consent");
+        assertEq(reason, NO_CONSENT, "2. school before consent");
 
         _grant(guardian, school, MEASLES_STATUS, 30);
-        assertEq(token.balanceOf(guardian), 1, "2. first reward");
+        assertEq(token.balanceOf(guardian), 1, "3. first reward");
         (allowed,) = _request(school, guardian, MEASLES_STATUS, RECORD);
         assertTrue(allowed, "3. school status allowed");
 
@@ -628,7 +691,9 @@ contract ConsentManagerTest is Test {
         assertTrue(allowed, "4. doctor schedule allowed");
 
         (, reason) = _request(doctor, guardian, VACCINATION_SCHEDULE, TAMPERED);
-        assertEq(reason, HASH_MISMATCH, "5. tampered copy");
+        assertEq(reason, HASH_MISMATCH, "5. tampered copy, doctor grant still active");
+        (allowed,) = _request(doctor, guardian, VACCINATION_SCHEDULE, RECORD);
+        assertTrue(allowed, "5. the original still verifies");
 
         _revoke(guardian, school, MEASLES_STATUS);
         (, reason) = _request(school, guardian, MEASLES_STATUS, RECORD);
@@ -641,5 +706,111 @@ contract ConsentManagerTest is Test {
         vm.warp(_expiry(guardian, school, MEASLES_STATUS));
         (, reason) = _request(school, guardian, MEASLES_STATUS, RECORD);
         assertEq(reason, EXPIRED, "7. expired");
+    }
+
+    /// @notice [SOL-CM-20] Revert order with several failing conditions at once: grantConsent checks UnsupportedScope, then InvalidDuration, then NotRegistered, then ConsentStillActive; revokeConsent checks UnsupportedScope before NoConsentToRevoke.
+    /// @dev Why it matters: the menu prints the bare error name and Python's fake chain raises in this order, so a different order would show the guardian a different "rejected: <Name>" on the real node than in the Python tests.
+    /// @custom:requirement Interface: revert order matches the Python error messages
+    function testGrantAndRevokeRevertOrder() public {
+        // Unregistered owner and requester + unsupported scope + 0 days -> UnsupportedScope.
+        vm.prank(stranger);
+        vm.expectRevert(ConsentManager.UnsupportedScope.selector);
+        manager.grantConsent(stranger, UNSUPPORTED, 0);
+
+        // Unregistered owner and requester + 0 days -> InvalidDuration.
+        vm.prank(stranger);
+        vm.expectRevert(ConsentManager.InvalidDuration.selector);
+        manager.grantConsent(stranger, MEASLES_STATUS, 0);
+
+        // Unregistered requester + 366 days -> InvalidDuration.
+        vm.prank(guardian);
+        vm.expectRevert(ConsentManager.InvalidDuration.selector);
+        manager.grantConsent(stranger, MEASLES_STATUS, 366);
+
+        // Active grant + 0 days -> InvalidDuration, not ConsentStillActive. (NotRegistered and
+        // ConsentStillActive cannot hold together: an active grant needs two registered parties.)
+        _grant(guardian, school, MEASLES_STATUS, 30);
+        vm.prank(guardian);
+        vm.expectRevert(ConsentManager.InvalidDuration.selector);
+        manager.grantConsent(school, MEASLES_STATUS, 0);
+
+        // Revoke: unsupported scope on a never-granted tuple -> UnsupportedScope.
+        vm.prank(stranger);
+        vm.expectRevert(ConsentManager.UnsupportedScope.selector);
+        manager.revokeConsent(stranger, UNSUPPORTED);
+
+        assertEq(token.totalSupply(), 1, "only the one valid grant was rewarded");
+    }
+
+    /// @notice [SOL-CM-21] A tuple's expiresAt, revoked and rewarded fields share one storage slot: a first grant, a revoke and a regrant each write only that slot, and getConsent and hasReceivedReward still read every field back.
+    /// @dev Why it matters: gas is a measured result, and writing a storage slot from zero costs about 20,000 gas. With the fields in separate slots, every revoke would cost about 19,000 gas more and every first grant about 24,000 more.
+    /// @custom:requirement Gas: a revoke or a first grant writes no new storage slot
+    function testConsentStateUsesOneStorageSlot() public {
+        vm.record();
+        _grant(guardian, school, MEASLES_STATUS, 30);
+        bytes32 slot = _onlyWrittenSlot("first grant");
+        uint256 firstExpiry = block.timestamp + 30 days;
+        assertTrue(manager.hasReceivedReward(guardian, school, MEASLES_STATUS), "rewarded set by the same write");
+
+        vm.record();
+        _revoke(guardian, school, MEASLES_STATUS);
+        assertEq(_onlyWrittenSlot("revoke"), slot, "revoke writes the grant's slot");
+        (uint256 expiresAt, bool revoked) = manager.getConsent(guardian, school, MEASLES_STATUS);
+        assertTrue(revoked);
+        assertEq(expiresAt, firstExpiry, "revoke keeps expiresAt");
+        assertTrue(manager.hasReceivedReward(guardian, school, MEASLES_STATUS), "revoke keeps rewarded");
+
+        vm.record();
+        _grant(guardian, school, MEASLES_STATUS, 365);
+        assertEq(_onlyWrittenSlot("regrant"), slot, "regrant writes the same slot");
+        (expiresAt, revoked) = manager.getConsent(guardian, school, MEASLES_STATUS);
+        assertEq(expiresAt, block.timestamp + 365 days, "full expiry read back");
+        assertFalse(revoked, "regrant clears revoked");
+        assertTrue(manager.hasReceivedReward(guardian, school, MEASLES_STATUS), "regrant keeps rewarded");
+        assertEq(token.balanceOf(guardian), 1, "still one reward");
+
+        // Another tuple gets a slot of its own.
+        vm.record();
+        _grant(guardian, school, VACCINATION_SCHEDULE, 30);
+        assertTrue(_onlyWrittenSlot("other tuple") != slot, "one slot per tuple");
+    }
+
+    /// @notice [SOL-CM-22] Stated limitation: the (owner, requester, scope) tuple is the only reward limit. Three registered wallets with no attested record mint 2 * 3 * 3 = 18 units by granting each other, and themselves, both scopes; regrants after expiry add none, and the units open no record.
+    /// @dev Why it matters: this pins the real bound (2k^2 units from k wallets, no vaccination record needed), not just one self-reward per scope. It stays harmless for access because access never reads a balance (SOL-RT-05).
+    /// @custom:requirement Rewards: stated limitation, rewards are limited per tuple only
+    function testRewardLimitIsPerTupleOnly() public {
+        address[3] memory wallets = [makeAddr("wallet0"), makeAddr("wallet1"), makeAddr("wallet2")];
+        string[3] memory labels = ["wallet0", "wallet1", "wallet2"];
+        for (uint256 i = 0; i < wallets.length; i++) {
+            _register(wallets[i], labels[i]);
+        }
+
+        for (uint256 i = 0; i < wallets.length; i++) {
+            for (uint256 j = 0; j < wallets.length; j++) {
+                for (uint8 scope = MEASLES_STATUS; scope <= VACCINATION_SCHEDULE; scope++) {
+                    _grant(wallets[i], wallets[j], scope, 1);
+                }
+            }
+        }
+        for (uint256 i = 0; i < wallets.length; i++) {
+            (,, bytes32 vaccinationHash) = registry.getUserInfo(wallets[i]);
+            assertEq(vaccinationHash, bytes32(0), "no attested record");
+            assertEq(token.balanceOf(wallets[i]), 6, "one unit per requester (itself included) and scope");
+        }
+        assertEq(token.totalSupply(), 18, "2 * k * k units from k = 3 wallets");
+
+        // The tuple limit itself still holds: regrants after expiry mint nothing.
+        vm.warp(block.timestamp + 1 days);
+        _grant(wallets[0], wallets[1], MEASLES_STATUS, 1);
+        _grant(wallets[2], wallets[2], VACCINATION_SCHEDULE, 1);
+        assertEq(token.totalSupply(), 18, "no reward for a regrant");
+
+        // The units open nothing: these grants cover no record, and a balance is not consent.
+        (bool allowed, uint8 reason) = _request(wallets[1], wallets[0], MEASLES_STATUS, bytes32(0));
+        assertFalse(allowed);
+        assertEq(reason, MISSING_EVIDENCE, "granted, but the owner has no record");
+        (allowed, reason) = _request(wallets[0], guardian, MEASLES_STATUS, RECORD);
+        assertFalse(allowed);
+        assertEq(reason, NO_CONSENT, "six units do not open the guardian's record");
     }
 }

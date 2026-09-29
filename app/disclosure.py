@@ -1,19 +1,29 @@
-"""Developer 3: permitted output projection and the local disclosure boundary.
-Coordinate helper results with Developer 4. A school must never receive the full vaccination card.
+# AI assistance: parts of this file were written with Claude (Anthropic) and thoroughly reviewed.
+"""Permitted output projection and the local disclosure boundary.
+A school must never receive the full vaccination card.
 
 Chain calls go through "from app import chain" only, so tests can swap in a fake in one place.
-AI note: parts of this file were written with help from Claude and checked by hand.
 """
 from typing import Any
 from app import chain, records
 from app.models import (
     VaccinationCard, AccessResponse, Scope, Reason, RecordSnapshot,
-    ChainUnavailable, TransactionRejected, TransactionPending,
+    ChainUnavailable, Web3NotInstalled, DeploymentUnavailable, TransactionRejected, TransactionPending,
     OUTCOME_ALLOWED, OUTCOME_DENIED, OUTCOME_UNAVAILABLE, OUTCOME_PENDING,
 )
 
 # console text for NotImplementedError only, never an outcome
-NOT_IMPLEMENTED_MESSAGE = "not implemented yet"
+NOT_IMPLEMENTED_MESSAGE = "not implemented"
+# console text for DeploymentUnavailable only: the node answered, but nothing usable is deployed on it
+NO_DEPLOYMENT_MESSAGE = "no deployment for this node: run python -m scripts.deploy_local --reset"
+# console text for ArtifactUnavailable (a DeploymentUnavailable): deploying would fail the same way
+NO_ARTIFACTS_MESSAGE = "compiled contracts not found: run npm run compile first"
+# console text for Web3NotInstalled: the node may well be running
+NO_WEB3_MESSAGE = "web3 not installed: run python -m pip install -r requirements.txt with the venv's Python"
+# denial_message for unavailable: with a logged request the local record did not verify against it;
+# without one nothing was confirmed on-chain, because the node, the receipt or the event failed
+RECORD_UNAVAILABLE_MESSAGE = "unavailable: local record could not be verified, not a clinical result"
+CHAIN_UNAVAILABLE_MESSAGE = "unavailable: local node or receipt problem, nothing released"
 ZERO_HASH = bytes(32)
 
 
@@ -47,12 +57,18 @@ def perform_access(settings: dict[str, Any], requester_label: str, owner: str, s
     network failure, missing event or changed authorization. Tokens do not move during access.
     When Python itself submitted the zero hash, show outcome unavailable (not a clinical NO) whatever reason the event carries.
     An unknown requester label is unavailable with no transaction. Chain errors become unavailable or pending;
-    NotImplementedError is passed on so the console can say "not implemented yet".
+    an unavailable response from a chain error has no transaction hash, so denial_message blames the node or
+    receipt, not the local record. NotImplementedError, DeploymentUnavailable (ArtifactUnavailable included)
+    and Web3NotInstalled are passed on, so the console can say "not implemented" or how to deploy,
+    compile or install web3 instead. None of them releases anything.
     """
     if requester_label not in settings["actor_account_indices"]:
         return format_denial(OUTCOME_UNAVAILABLE)
     try:
         return _release(settings, requester_label, owner, scope)
+    except (DeploymentUnavailable, Web3NotInstalled):
+        # a setup problem, not an answer about this record
+        raise
     except TransactionPending:
         return format_denial(OUTCOME_PENDING)
     except (ChainUnavailable, TransactionRejected):
@@ -90,7 +106,10 @@ def format_denial(outcome: str, reason: str = "", transaction_hash: str = "") ->
 
 
 def denial_message(response: AccessResponse) -> str:
-    """Console text for a denied, unavailable or pending response. Never shows fields or exception text."""
+    """Console text for a denied, unavailable or pending response. Never shows fields or exception text.
+    Unavailable with a transaction hash means a request was logged but the local record (or its salt, or
+    the registered commitment) did not verify; without one, nothing was confirmed on-chain.
+    """
     outcome = response["outcome"]
     if outcome == OUTCOME_DENIED:
         message = f"denied: {response['reason']}" if response["reason"] else "denied"
@@ -98,8 +117,8 @@ def denial_message(response: AccessResponse) -> str:
             message += f" (logged on-chain in {response['transaction_hash']})"
         return message
     if outcome == OUTCOME_UNAVAILABLE:
-        # same text whatever reason the event carried, e.g. when Python itself sent the zero hash
-        return "unavailable: local record could not be verified, not a clinical result"
+        # the event's reason is never shown, e.g. when Python itself sent the zero hash
+        return RECORD_UNAVAILABLE_MESSAGE if response["transaction_hash"] else CHAIN_UNAVAILABLE_MESSAGE
     if outcome == OUTCOME_PENDING:
         return "pending: not confirmed, nothing released"
     raise ValueError("denial_message is only for denied, unavailable or pending")

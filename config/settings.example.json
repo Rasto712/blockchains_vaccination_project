@@ -1,5 +1,5 @@
 {
-  "description": "Example only. No connection or deployment exists yet. Resolve paths relative to project root.",
+  "description": "Copy to config/settings.json (git ignored) and adjust rpc_url and account indices. Paths are relative to the project root. scripts/deploy_local.py writes deployment_file.",
   "rpc_url": "http://127.0.0.1:8545",
   "expected_chain_id": 31337,
   "data_root": "runtime-data",

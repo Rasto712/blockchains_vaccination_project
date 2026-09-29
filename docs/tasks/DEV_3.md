@@ -1,5 +1,7 @@
 # Developer 3: Python console, JSON and minimal disclosure
 
+Status (2026-09-28): done. The Python unit tests pass and the menu runs on a local node ([README](../../README.md)).
+
 ## Files
 
 app/main.py; app/records.py; app/disclosure.py; data/examples/vaccination_record.json; local identity/salt fixtures; app/models.py (shared). Developer 4 owns app/chain.py.

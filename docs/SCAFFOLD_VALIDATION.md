@@ -1,4 +1,6 @@
-# Checks actually performed
+# Checks actually performed on the scaffold
+
+Status (2026-09-28): this page is the scaffold baseline from before implementation, kept as a record. It no longer describes the code: nothing raises NotImplementedError now, `python -m app.main` runs the full menu, and the 38 Solidity tests pass. The current checks and their commands are in [TESTING.md](TESTING.md) and the [README](../README.md).
 
 - Compiled all three contract sources and all three Solidity test-outline sources using the official Solidity 0.8.28 compiler (download hash checked against the official release list).
 - Compiler result: zero errors. Warnings concern intentionally unused stub parameters and potentially stricter mutability; no business behavior is implemented.

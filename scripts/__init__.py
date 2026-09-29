@@ -1,1 +1,1 @@
-"""Local deployment outlines. This package performs no work on import."""
+"""Local deployment helpers. This package performs no work on import."""

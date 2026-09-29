@@ -1,21 +1,23 @@
 # For Dev 5
 
+Status (2026-09-28): the whole story now runs on a local node, and the doc fixes listed under "Docs that are out of date" are done (README run steps and troubleshooting, DEMO.md order, SCAFFOLD_VALIDATION labelled as the baseline, TESTING.md). On 2026-09-28 I completed the remaining parts with AI assistance, as disclosed in each changed file (see [TEAM_TASKS.md](TEAM_TASKS.md)). "What I need from you" is still open. The rest of this note is kept as written, with its counts and status updated.
+
 What you need from the Python side for the report, the README, the demo and the slides, and what I need from you. Read this next to [tasks/DEV_5.md](tasks/DEV_5.md) and [REPORT_OUTLINE.md](REPORT_OUTLINE.md). The other handoff notes are [FOR_DEV_1.md](FOR_DEV_1.md), [FOR_DEV_2.md](FOR_DEV_2.md) and [FOR_DEV_4.md](FOR_DEV_4.md).
 
 ## Where things stand
 
-The Python side is done: the local record, salts and commitments (`app/records.py`), the release rule and the school and doctor views (`app/disclosure.py`), the menu (`app/main.py`) and the tamper step in `integration/demo_workflow.py`. It has 106 unit tests and none of them needs a node: the ones that touch the chain use a fake, because there is no working contract yet. Nothing runs on a real node until the contracts deploy and `chain.py` exists.
+The Python side is done: the local record, salts and commitments (`app/records.py`), the release rule and the school and doctor views (`app/disclosure.py`), the menu (`app/main.py`) and the tamper step in `integration/demo_workflow.py`. It has 337 unit tests and none of them needs a node: the ones that touch the chain use a fake or mock web3. The contracts deploy and `chain.py` is done, so the menu and the scripted demo run on a real node.
 
 ## Docs that are out of date
 
 - README: I have updated "What works now", the layout (`tests/`, `runtime-data/`), the run steps (settings copy, tests, `-m`) and the broken errata link. You own it now, so please check it reads right to you.
 - DEMO.md:3 says "The application currently only prints scaffold status." The menu exists now.
 - Demo order: DEMO.md has revoke as step 5 and tamper as step 6. The scripted demo runs tamper first, then revoke, then the 1-day regrant and expiry. The result is the same, because the tamper step only uses the doctor grant. Either renumber DEMO.md (5 tamper, 6 revoke, 7 regrant and expiry, 8 results) or agree another order with Rasto, who owns `demo_workflow.main`. TESTING.md:11 has the same order as DEMO.md.
-- Which tool runs which step: the menu (`python -m app.main`) covers steps 1 to 5:
+- Which tool runs which step: the menu (`python -m app.main`) covers steps 1 to 5 (steps 1-4 and 6 in the renumbered DEMO.md):
   - Step 1 is "show my registration" as guardian. It prints the local and on-chain commitment and "local commitment matches: yes". The JSON itself is shown by opening the file.
   - Steps 2 to 5 are school check, grant, doctor view and revoke.
 
-  Tamper and expiry only run from `python -m integration.demo_workflow`. If the menu is the backup, the presenter has to switch actors:
+  Tamper and expiry only run from `python -m integration.demo_workflow [--settings PATH]`. It deploys fresh contracts first, replacing `deployment.json`, and moves node time forward about one day per run, so it can be rehearsed on the same node. If the menu is the backup, the presenter has to switch actors:
   - guardian, school and doctor each register as themselves
   - attest is done as clinic (anyone else gets "rejected: NotTrustedClinic")
   - grant and revoke are done as guardian
@@ -48,7 +50,7 @@ Most of this goes in my Implementation subsection. It is here so the rest of the
   Setup makes exactly these 8 files. Rasto's `deployment.json` lives there too.
 - Hashed and stored on-chain as bytes32: the record commitment, plus one identity hash each for guardian, school and doctor. The deployer and the clinic never register.
 - Python only ever sends addresses, those hashes, the scope, the duration in days and the observed hash on each request. It never sends a salt, raw JSON, any record field or a file path.
-- The record is saved byte for byte, only inside `runtime-data/`, and never overwritten. Parsing is strict: bad UTF-8, a repeated key or an extra key is rejected. Each request reads the file once, and the hash and the released view come from that same read.
+- The record is saved byte for byte, only inside `runtime-data/` (the `data_root` setting, which can point outside the repo), and never overwritten. Parsing is strict: bad UTF-8, a repeated key or an extra key is rejected. Each request reads the file once, and the hash and the released view come from that same read.
 
 ### What the school and doctor see
 
@@ -56,7 +58,7 @@ Most of this goes in my Implementation subsection. It is here so the rest of the
 - The doctor gets only `{"vaccinations": [{"vaccine": "MMR", "date": "2026-03-12"}]}`, printed as "allowed: MMR on 2026-03-12 (logged on-chain in 0x...)".
 - Neither ever gets the child id, the covers list, the clinic, the batch, the salt, the raw JSON or the file path. The view is picked by scope, not by who asks.
 - "Verified" means a clinic-attested MMR record that covers measles exists and matches the on-chain commitment. It does not mean the child is immune, or that the record is clinically complete.
-- A failed or missing record shows "unavailable: local record could not be verified, not a clinical result". Never describe that as not vaccinated.
+- A failed or missing record shows "unavailable: local record could not be verified, not a clinical result". Never describe that as not vaccinated. A node, receipt or event failure during the request shows "unavailable: local node or receipt problem, nothing released" instead, because the record was never judged.
 
 ### Release rule and outcomes
 
@@ -75,19 +77,24 @@ Most of this goes in my Implementation subsection. It is here so the rest of the
 
 ### Python unit tests
 
-- There are 106 tests, all passing, using the standard library `unittest`:
+- There are 337 tests, all passing, using the standard library `unittest` (106 when this note was first written):
 
   | File | Tests |
   | --- | --- |
-  | `test_records.py` | 45 |
-  | `test_access.py` | 22 |
-  | `test_main.py` | 17 |
-  | `test_disclosure.py` | 16 |
+  | `test_measure.py` | 62 |
+  | `test_chain.py` | 57 |
+  | `test_records.py` | 55 |
+  | `test_demo.py` | 40 |
+  | `test_main.py` | 27 |
+  | `test_export_python_results.py` | 26 |
+  | `test_access.py` | 24 |
+  | `test_deploy.py` | 23 |
+  | `test_disclosure.py` | 17 |
   | `test_tamper.py` | 6 |
 
   Run them with `python -m unittest discover -s tests`. They need no node.
-- The 28 in `test_access.py` and `test_tamper.py` run against `tests/fake_chain.py`, which copies the agreed contract rules, and the rest need no chain at all. So they are evidence for the Python side only. On-chain evidence comes from Robin's Solidity suites and the scripted integration run, so please report them that way.
-- The menu's chain actions have no unit tests. Rewards and audit are only checked on a real node.
+- The 30 in `test_access.py` and `test_tamper.py`, and the menu tests, run against `tests/fake_chain.py`, which copies the agreed contract rules. `test_demo.py` and `test_measure.py` run the scripted demo and the measurement scenario against the same fake with the node calls mocked, and `test_chain.py` and `test_deploy.py` mock web3, and `test_export_python_results.py` covers the offline parts of the PY exporter. So they are evidence for the Python side only. On-chain evidence comes from Robin's Solidity suites and the scripted integration run, so please report them that way.
+- The menu's chain actions (grant, rewards, audit, attest) are unit-tested against the fake. Real rewards and the real audit log are checked on a node by `python -m integration.demo_workflow`.
 - Good candidates for the "why it matters" column:
   - `test_vaccination_vector`
   - `test_one_flipped_bit_changes_the_commitment`
@@ -110,6 +117,7 @@ REPORT_OUTLINE.md already lists local role selection, Python mediating disclosur
 6. Salts exist only on the local machine. Losing `runtime-data/private` after attestation makes the record unverifiable on that deployment for good.
 7. The identity hash only commits to a local synthetic file. It proves nothing about who the person really is.
 8. An unknown requester or a node that is down leaves no on-chain event.
+9. `grantConsent` has no owner != requester check, so a guardian can grant consent to its own wallet and earn at most one reward per scope that way. Fake requester identities could each earn one too; the reward is not Sybil-resistant.
 
 ### Contribution
 
@@ -120,6 +128,7 @@ REPORT_OUTLINE.md already lists local role selection, Python mediating disclosur
   - `cf61b5d` and `1d8bb00`: the rest of the Python side
 
   The original scaffold is Rasto's commit `1d376ed`.
+- On 2026-09-28 I took over the remaining parts and completed them with AI assistance (Claude): ConsentManager and registerVaccination, the review fixes to the registry, the token, the Solidity tests and the exporter, the fixes to `chain.py` and `deploy_local.py`, the rest of the scripted demo, `measure.py`, the `data_root` setting in `records.py`, the unit tests for chain, deploy, demo and measure, and the doc updates. Each of those code files says so in an AI line in its header, the README, CONTRACT_API, DEMO, TESTING and REPORT_OUTLINE say it in their last line, and FROM_DEV_2.md says it for Robin's files. Those changes were not committed yet when this note was updated.
 - The Dev 3 files carry a one-line AI note in their header, and I will write my own part of the AI statement.
 
 ## What I need from you
@@ -133,5 +142,5 @@ REPORT_OUTLINE.md already lists local role selection, Python mediating disclosur
    - PY-nn for mine
    - INT-nn for the scripted run
 
-   Please also send the numbered requirement ids from the Architecture section for the requirement column, and confirm which file you read. It is probably `evaluation/results/test_results.csv`, since the templates keep headers only. Rasto owns `evaluation/`, so tell him too.
+   Please also send the numbered requirement ids from the Architecture section for the requirement column. The results are in two files under the same header: `evaluation/results/solidity_test_results.csv` for the SOL rows (`python -m evaluation.export_solidity_results`) and `evaluation/results/test_results.csv` for mine (`python -m evaluation.export_python_results`, which needs the node). Please read both.
 6. An early run of the README on your own machine, which DEV_5.md already asks for, now that the README has the settings copy step. On Windows the fixtures hash the same, because `.gitattributes` pins `*.json` to LF.

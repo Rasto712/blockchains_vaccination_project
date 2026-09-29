@@ -1,1 +1,1 @@
-"""Python console application scaffold. This package performs no work on import."""
+"""Python console application. This package performs no work on import."""

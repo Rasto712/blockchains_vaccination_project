@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: UNLICENSED
+// AI assistance: parts of this file were written with Claude (Anthropic) and thoroughly reviewed.
 pragma solidity 0.8.28;
 
 import {Test} from "forge-std/Test.sol";
@@ -11,12 +12,12 @@ contract DummyContract {}
 
 /**
  * @title ConsentRewardTokenTest
- * @notice Developer 2: Solidity unit tests for ConsentRewardToken (run with `npm test`, Hardhat 3 + forge-std).
- * @dev Test IDs SOL-RT-01..07 are stable; the report and evaluation/results/test_results.csv cite them.
+ * @notice Solidity unit tests for ConsentRewardToken (run with `npm test`, Hardhat 3 + forge-std).
+ * @dev Test IDs SOL-RT-01..07 are stable; evaluation/results/solidity_test_results.csv
+ *      (written by evaluation/export_solidity_results.py) cites them.
  *      The token is deployed from a separate `deployer` wallet so "deployer" and "minter" are distinct actors.
  *      In RT-02..04 this test contract plays the minter (it is a contract, like ConsentManager); RT-05 uses the
- *      real ConsentManager, so it only passes once Developer 1's contracts are implemented.
- *      AI assistance: drafted with Claude (Anthropic) and reviewed by Developer 2.
+ *      real IdentityRegistry and ConsentManager.
  */
 contract ConsentRewardTokenTest is Test {
     ConsentRewardToken internal token;
@@ -41,8 +42,8 @@ contract ConsentRewardTokenTest is Test {
         token.setMinterOnce(address(this));
     }
 
-    /// @notice [SOL-RT-01] Reject a wrong caller, zero and non-contract minters, and a second configuration; the deployer configures exactly once.
-    /// @dev Why it matters: whoever is minter controls all rewards, so setup must be a one-shot deployer action that points at a contract, never at a person.
+    /// @notice [SOL-RT-01] Reject a wrong caller (also one whose tx.origin is the deployer), zero and non-contract minters, and a second configuration, in the order NotDeployer, MinterAlreadySet, ZeroAddress, NotAContract; the deployer configures exactly once.
+    /// @dev Why it matters: whoever is minter controls all rewards, so setup must be a one-shot deployer action that points at a contract, never at a person. Only msg.sender counts: a tx.origin check would let any contract the deployer's wallet calls choose the minter.
     /// @custom:requirement Rewards: the minter is set once, by the deployer, to a contract
     function testOnlyDeployerCanConfigureMinterOnce() public {
         DummyContract manager = new DummyContract();
@@ -51,6 +52,16 @@ contract ConsentRewardTokenTest is Test {
         vm.prank(attacker);
         vm.expectRevert(ConsentRewardToken.NotDeployer.selector);
         token.setMinterOnce(address(manager));
+
+        // A call reached from the deployer's own transaction (tx.origin == deployer) through another account.
+        vm.prank(attacker, deployer);
+        vm.expectRevert(ConsentRewardToken.NotDeployer.selector);
+        token.setMinterOnce(address(manager));
+
+        // Wrong caller AND zero address -> NotDeployer comes first.
+        vm.prank(attacker);
+        vm.expectRevert(ConsentRewardToken.NotDeployer.selector);
+        token.setMinterOnce(address(0));
 
         vm.prank(deployer);
         vm.expectRevert(ConsentRewardToken.ZeroAddress.selector);
@@ -71,6 +82,18 @@ contract ConsentRewardTokenTest is Test {
         vm.prank(deployer);
         vm.expectRevert(ConsentRewardToken.MinterAlreadySet.selector);
         token.setMinterOnce(address(other));
+
+        // After setup: a wrong caller still sees NotDeployer first; the deployer sees MinterAlreadySet
+        // before any address check (zero address, wallet).
+        vm.prank(attacker);
+        vm.expectRevert(ConsentRewardToken.NotDeployer.selector);
+        token.setMinterOnce(address(other));
+        vm.prank(deployer);
+        vm.expectRevert(ConsentRewardToken.MinterAlreadySet.selector);
+        token.setMinterOnce(address(0));
+        vm.prank(deployer);
+        vm.expectRevert(ConsentRewardToken.MinterAlreadySet.selector);
+        token.setMinterOnce(guardian);
         assertEq(token.minter(), address(manager), "minter unchanged");
     }
 
@@ -119,12 +142,16 @@ contract ConsentRewardTokenTest is Test {
         assertEq(token.totalSupply(), 3, "supply = sum of balances");
     }
 
-    /// @notice [SOL-RT-04] Minting to the zero address is rejected and changes nothing.
+    /// @notice [SOL-RT-04] Minting to the zero address is rejected and changes nothing; the minter check comes first, so a non-minter sees NotMinter.
     /// @dev Why it matters: a reward sent to address(0) would inflate supply with units nobody holds.
     /// @custom:requirement Rewards: no mint to the zero address
     function testRejectZeroRecipient() public {
         _configureSelfAsMinter();
         vm.expectRevert(ConsentRewardToken.ZeroAddress.selector);
+        token.mintReward(address(0));
+
+        vm.prank(attacker);
+        vm.expectRevert(ConsentRewardToken.NotMinter.selector);
         token.mintReward(address(0));
         assertEq(token.totalSupply(), 0);
         assertEq(token.balanceOf(address(0)), 0);

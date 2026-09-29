@@ -1,5 +1,7 @@
 # Developer 4: Hardhat setup, integration and measurements
 
+Status (2026-09-28): done. Commands are in the [README](../../README.md) and results in evaluation/results/; parts were completed by Magdy with AI assistance ([team](../TEAM_TASKS.md)).
+
 ## Files
 
 Lab-derived Hardhat config/deployment scripts; app/chain.py; integration/demo_workflow.py; evaluation/measure.py; app/models.py (shared); generated deployment addresses/ABIs and result tables.

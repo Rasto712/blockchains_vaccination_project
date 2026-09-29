@@ -1,8 +1,9 @@
+# AI assistance: parts of this file were written with Claude (Anthropic) and thoroughly reviewed.
 """Tests for app/records.py. Only temporary directories are written to.
-AI note: parts of this file were written with help from Claude and checked by hand.
 """
 import base64
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -334,6 +335,17 @@ class SaltFileTests(RecordsTestCase):
         self.assertEqual(str(caught.exception), "salt unavailable")
         self.assert_no_data_in(caught.exception, str(self.path))
 
+    @unittest.skipUnless(os.name == "posix", "file modes are POSIX only")
+    def test_salt_file_is_readable_by_its_owner_only(self):
+        # the usual umask would leave a new file world-readable; the salts are the one local secret
+        previous = os.umask(0o022)
+        self.addCleanup(os.umask, previous)
+        records.save_salt(self.path, TEST_SALT)
+        self.assertEqual(self.path.stat().st_mode & 0o777, 0o600)
+        record_path = self.root / "runtime-data" / "vaccination_record.json"
+        records.save_record(record_path, EXAMPLE_CARD)
+        self.assertEqual(record_path.stat().st_mode & 0o777, 0o644)
+
 
 class SnapshotTests(RecordsTestCase):
     def setUp(self):
@@ -512,3 +524,111 @@ class SetupRuntimeTests(RecordsTestCase):
         for path, content in before.items():
             if path != school_salt:
                 self.assertEqual(after[path], content)
+
+
+class DataRootTests(RecordsTestCase):
+    """settings data_root: the default, relative and absolute values, and a data root outside the project.
+    DATA_ROOT keeps its real value (<project>/runtime-data) here unless a test says otherwise, so only
+    data_root can allow the writes below, and none of them can land in the project.
+    """
+
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.temp = Path(folder.name).resolve()
+        self.outside = self.temp / "elsewhere-data"
+        self.settings = {
+            "data_root": str(self.outside),
+            "vaccination_file": str(self.outside / "vaccination_record.json"),
+            "vaccination_salt_file": str(self.outside / "private" / "vaccination_salt.json"),
+            "identity_directory": str(self.outside / "identities"),
+            "identity_salt_directory": str(self.outside / "private"),
+        }
+
+    def temp_files(self):
+        return sorted(path for path in self.temp.rglob("*") if path.is_file())
+
+    def test_default_is_runtime_data_in_the_project(self):
+        self.assertEqual(records.DATA_ROOT, records.PROJECT_ROOT / "runtime-data")
+        self.assertEqual(records.data_root({}), records.PROJECT_ROOT / "runtime-data")
+        example = json.loads((records.PROJECT_ROOT / "config" / "settings.example.json").read_bytes())
+        self.assertEqual(records.data_root(example), records.PROJECT_ROOT / "runtime-data")
+
+    def test_relative_is_taken_from_the_project_root_not_the_working_folder(self):
+        self.addCleanup(os.chdir, os.getcwd())
+        os.chdir(self.temp)
+        self.assertEqual(records.data_root({"data_root": "other/data"}), records.PROJECT_ROOT / "other" / "data")
+
+    def test_absolute_is_used_as_given(self):
+        self.assertEqual(records.data_root(self.settings), self.outside)
+        self.assertNotIn(records.PROJECT_ROOT.resolve(), self.outside.parents)
+
+    def test_invalid_values_are_refused(self):
+        for value in (None, "", "   ", 5, ["runtime-data"]):
+            with self.subTest(value=value):
+                with self.assertRaises(records.RecordError) as caught:
+                    records.data_root({"data_root": value})
+                self.assertEqual(str(caught.exception), "invalid setting: data_root")
+
+    def test_setup_writes_every_file_under_an_absolute_data_root_outside_the_project(self):
+        created = records.setup_runtime(self.settings)
+        self.assertEqual(len(created), 8)
+        self.assertEqual(sorted(created), self.temp_files())
+        for path in created:
+            self.assertIn(self.outside, path.parents)
+            self.assertNotIn(records.PROJECT_ROOT.resolve(), path.resolve().parents)
+        self.assertEqual((self.outside / "vaccination_record.json").read_bytes(), EXAMPLE_RECORD)
+        self.assertEqual(records.setup_runtime(self.settings), [])
+
+    def test_record_outside_the_configured_data_root_creates_nothing(self):
+        # inside the default runtime-data would not help either: the configured data root decides
+        for record_path in (self.temp / "other" / "vaccination_record.json", self.outside, self.outside / ".." / "card.json"):
+            with self.subTest(str(record_path)):
+                settings = dict(self.settings, vaccination_file=str(record_path))
+                with self.assertRaises(records.RecordError) as caught:
+                    records.setup_runtime(settings)
+                self.assertEqual(str(caught.exception), "record path must be inside the data root")
+                self.assert_no_data_in(caught.exception, str(record_path), str(self.outside))
+                self.assertEqual(self.temp_files(), [])
+
+    def test_save_record_checks_the_given_root_instead_of_the_default(self):
+        default_root = self.temp / "default-root"
+        with mock.patch.object(records, "DATA_ROOT", default_root):
+            records.save_record(self.outside / "card.json", EXAMPLE_CARD, self.outside)
+            self.assertEqual((self.outside / "card.json").read_bytes(), EXAMPLE_RECORD)
+            with self.assertRaises(records.RecordError):
+                records.save_record(default_root / "card.json", EXAMPLE_CARD, self.outside)
+            with self.assertRaises(records.RecordError):
+                records.save_record(self.outside / "second.json", EXAMPLE_CARD)
+            records.save_record(default_root / "card.json", EXAMPLE_CARD)
+        self.assertEqual(self.temp_files(), [default_root / "card.json", self.outside / "card.json"])
+
+    def test_shown_path_never_shows_the_home_folder(self):
+        project = records.PROJECT_ROOT
+        for path, settings, shown in (
+            (project / "runtime-data" / "deployment.json", self.settings, "runtime-data/deployment.json"),
+            (self.outside / "private" / "vaccination_salt.json", self.settings, "<data_root>/private/vaccination_salt.json"),
+            (self.outside, self.settings, "<data_root>"),
+            (self.outside / "private" / "vaccination_salt.json", None, "vaccination_salt.json"),
+            (self.temp / "elsewhere" / "deployment.json", self.settings, "deployment.json"),
+            (self.outside / "x.json", {"data_root": ""}, "x.json"),
+            (Path("/dev/null/deployment.json"), self.settings, "deployment.json"),
+        ):
+            with self.subTest(str(path)):
+                self.assertEqual(records.shown_path(path, settings), shown)
+                self.assertNotIn(str(self.temp), records.shown_path(path, settings))
+
+    def test_relative_data_root_other_than_runtime_data(self):
+        project = self.temp / "project"
+        settings = {
+            "data_root": "custom-data",
+            "vaccination_file": "custom-data/vaccination_record.json",
+            "vaccination_salt_file": "custom-data/private/vaccination_salt.json",
+            "identity_directory": "custom-data/identities",
+            "identity_salt_directory": "custom-data/private",
+        }
+        with mock.patch.object(records, "PROJECT_ROOT", project), mock.patch.object(records, "DATA_ROOT", project / "runtime-data"):
+            created = records.setup_runtime(settings)
+        self.assertEqual(len(created), 8)
+        self.assertTrue(all(project / "custom-data" in path.parents for path in created))
+        self.assertFalse((project / "runtime-data").exists())

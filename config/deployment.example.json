@@ -1,8 +1,17 @@
 {
-  "description": "Fill with actual receipt-confirmed local deployment addresses after constructors are implemented.",
+  "description": "Shape reference only; never fill in by hand. python -m scripts.deploy_local writes runtime-data/deployment.json after a fully successful deploy. app/chain.py rejects a stale file with deploy_block (number and hash of the block holding the IdentityRegistry deploy; a restarted node has another hash there) and code_hashes (keccak-256 of each contract's runtime code).",
   "chain_id": 31337,
   "artifacts_dir": "artifacts/contracts",
+  "deploy_block": {
+    "number": null,
+    "hash": null
+  },
   "contracts": {
+    "IdentityRegistry": null,
+    "ConsentManager": null,
+    "ConsentRewardToken": null
+  },
+  "code_hashes": {
     "IdentityRegistry": null,
     "ConsentManager": null,
     "ConsentRewardToken": null

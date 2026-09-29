@@ -1,5 +1,7 @@
 # Developer 1: Identity and consent contracts
 
+Status (2026-09-28): done. Both contracts are implemented and pass the Solidity tests; ConsentManager and registerVaccination were completed([team](../TEAM_TASKS.md)).
+
 ## Files
 
 contracts/IdentityRegistry.sol; contracts/ConsentManager.sol. Pair with Developer 2 on their matching Solidity tests.

@@ -1,5 +1,5 @@
 /**
- * Developer 4: minimal Hardhat 3 configuration, not application business logic.
+ * Minimal Hardhat 3 configuration, not application business logic.
  * Solidity tests live under test/; Hardhat 3 runs them natively and cheatcodes come from forge-std (devDependency).
  * Pinned to Hardhat 3.18.0 in package.json; change both together. Do not mix Hardhat 2 config.
  * Compiler version matches all .sol pragmas. No public network or signing secrets.

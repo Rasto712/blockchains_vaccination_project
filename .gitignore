@@ -1,5 +1,7 @@
 # Local runtime data and dependencies; never commit salts or keys.
 runtime-data/
+# each person's local copy of config/settings.example.json
+config/settings.json
 .venv/
 __pycache__/
 *.py[cod]
@@ -9,5 +11,6 @@ artifacts/
 cache/
 coverage/
 archive/
-# Preserve user IDE settings locally, outside the implementation scaffold.
+# Preserve user IDE settings locally, outside the repository.
 .idea/
+cool.md

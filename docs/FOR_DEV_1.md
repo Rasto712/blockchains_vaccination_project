@@ -1,10 +1,12 @@
 # For Dev 1
 
+Status (2026-09-28): everything this note asks for is now in the contracts. Both declare the error names exactly as proposed, ConsentManager and registerVaccination follow the rules below (on 2026-09-28 I completed them with AI assistance, and a live run matched `tests/fake_chain.py` in every revert order), and the whole story runs on a local node. [CONTRACT_API.md](CONTRACT_API.md) has the final revert orders. The rest of this note is kept as written, with its counts, its status and the list of functions Python uses updated.
+
 What the Python side needs from `contracts/IdentityRegistry.sol` and `contracts/ConsentManager.sol`, and what I need from you. Read this next to [tasks/DEV_1.md](tasks/DEV_1.md) and [CONTRACT_API.md](CONTRACT_API.md). Rasto's `chain.py` sits between your contracts and my code, and his notes are in [FOR_DEV_4.md](FOR_DEV_4.md). The other notes are [FOR_DEV_2.md](FOR_DEV_2.md) and [FOR_DEV_5.md](FOR_DEV_5.md).
 
 ## Where things stand
 
-The Python side is done: the local record, salts and commitments, the release rule, the school and doctor views, the menu and the tamper demo. It has 106 unit tests and none of them needs a node: the ones that touch the chain use a fake in `tests/fake_chain.py`, because there is no working contract yet. Nothing runs on a real node until your contracts deploy and `chain.py` exists.
+The Python side is done: the local record, salts and commitments, the release rule, the school and doctor views, the menu and the tamper demo. It has 337 unit tests and none of them needs a node: the ones that touch the chain use a fake in `tests/fake_chain.py` or mock web3. `chain.py` is done too, and since your contracts deploy, the menu and `python -m integration.demo_workflow` run on a real node.
 
 ## Python only reads the AccessAttempt event
 
@@ -38,12 +40,12 @@ Mint the grant reward to the guardian who grants (`msg.sender` of `grantConsent`
 
 ## Errors: please confirm the names
 
-Both contracts still declare only `NotImplemented`, and CONTRACT_API lists the error names as proposed, waiting for you. I need either "as proposed" or the final list. Please declare them as custom errors, not require strings, because the menu prints the bare name as "rejected: <Name>". My fake raises exactly these:
+Answered: both contracts declare these as custom errors, exactly as proposed, and `NotImplemented` is gone. The menu prints the bare name as "rejected: <Name>". My fake raises exactly these:
 
 - IdentityRegistry: `ZeroHash`, `AlreadyRegistered`, `NotTrustedClinic`, `NotRegistered`, `EvidenceAlreadyRegistered`
 - ConsentManager: `UnsupportedScope`, `InvalidDuration`, `NotRegistered`, `ConsentStillActive`, `NoConsentToRevoke`
 
-Tell me about any rename, or any extra revert that is not on the list (for example an evidence check or an owner != requester check in `grantConsent`). The Python tests mock the chain, so they would not notice, and the fake would quietly drift from your contract.
+Tell me about any rename, or any extra revert that is not on the list (for example an evidence check or an owner != requester check in `grantConsent`). The Python tests mock the chain, so they would not notice, and the fake would quietly drift from your contract. The one error the contracts add from outside this list is the token's `NotMinter`, which a failed mint passes up unchanged through `grantConsent`.
 
 ## Please check the fake
 
@@ -56,13 +58,13 @@ Tell me about any rename, or any extra revert that is not on the list (for examp
 - the zero hash handling
 - `getUserInfo` for an account that has not registered
 
-It does not model rewards, minting, the ConsentGranted and ConsentRevoked events or the constructors, so leave those out. The 28 tests in `tests/test_access.py` and `tests/test_tamper.py` stand on it.
+It does not model the token contract, the ConsentGranted and ConsentRevoked events or the constructors, so leave those out; it now keeps one lifetime reward per tuple as a plain balance for the menu tests. The 30 tests in `tests/test_access.py` and `tests/test_tamper.py` stand on it.
 
 ## What the first real run needs
 
-- Python calls seven of your functions: `registerUser`, `registerVaccination` and `getUserInfo` on the registry, and `grantConsent`, `revokeConsent`, `checkAccess` and `requestAccess` on the manager.
-- Rasto's deploy script needs the constructors, and his expiry step needs `expiresAt` (from `getConsent` or the ConsentGranted event).
-- Nothing in Python calls `hasReceivedReward` or `trustedClinic`, so those can come last.
+- The menu and the release rule call seven of your functions: `registerUser`, `registerVaccination` and `getUserInfo` on the registry, and `grantConsent`, `revokeConsent`, `checkAccess` and `requestAccess` on the manager.
+- Every other view is now used too, so none of them is safe to change on its own: `getConsent` (`app/chain.get_consent`, for the demo's exact-expiry step and the measurement), `trustedClinic` (read back by `scripts/deploy_local.py` after the registry deploy, as the token's `minter()` is after `setMinterOnce`), and `hasReceivedReward` (checked for every tuple by `evaluation/measure.py`, next to the token's `totalSupply`).
+- Rasto's deploy script needs the constructors.
 - `grantConsent` mints in the same transaction, so a grant only works once Robin's `setMinterOnce` and `mintReward` work too.
 
 Tell me and Rasto as soon as the contracts deploy and register and attest work. That is when we do the first run on the node, then the scripted demo.

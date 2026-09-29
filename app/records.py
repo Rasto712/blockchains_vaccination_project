@@ -1,14 +1,18 @@
-"""Developer 3: local JSON persistence and salted byte-snapshot commitments.
+# AI assistance: parts of this file were written with Claude (Anthropic) and thoroughly reviewed.
+"""Local JSON persistence and salted byte-snapshot commitments.
 Use fixed demo filenames under a configured root; no database, encryption or version store.
 
 Bad or missing local files raise RecordError. Its message never holds the data, the salt or a path,
 and it is raised outside any except block so the original error (which can hold them) is not chained.
-Paths in settings are relative to the project root.
-AI note: parts of this file were written with help from Claude and checked by hand.
+Paths in settings are relative to the project root; an absolute path is used as given. The record is only
+ever saved inside the data root (settings data_root, see data_root), which is runtime-data by default.
+Salt files are created readable by their owner only (0600 on POSIX), since the salts are what keep the
+on-chain commitments from being brute-forced from the synthetic data.
 """
 import base64
 import hashlib
 import json
+import os
 import re
 import secrets
 from datetime import date
@@ -17,12 +21,14 @@ from typing import Any
 from app.models import VaccinationCard, RecordSnapshot
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-# mirrors data_root in settings, because save_record gets no settings
+# the data root when settings have no data_root; data_root(settings) gives the configured one
 DATA_ROOT = PROJECT_ROOT / "runtime-data"
 EXAMPLES_DIR = PROJECT_ROOT / "data" / "examples"
 REGISTERING_LABELS = ("guardian", "school", "doctor")
 
 SALT_LENGTH = 32
+# new salt files: owner read/write only; records and identities keep the default mode
+SALT_FILE_MODE = 0o600
 COMMITMENT_PREFIXES = {
     "VACCINATION": b"VACCINATION:v1\n",
     "IDENTITY": b"IDENTITY:v1\n",
@@ -37,9 +43,10 @@ class RecordError(ValueError):
     """Local record, identity or salt is missing or invalid. Never a clinical result."""
 
 
-def save_record(path: Path, card: VaccinationCard) -> None:
+def save_record(path: Path, card: VaccinationCard, root: Path | None = None) -> None:
     """Validate and save the synthetic local card before clinic attestation.
-    Input path must resolve inside the configured data root (settings data_root). Reject malformed fields
+    Input path must resolve inside the configured data root: root, which setup_runtime passes as
+    data_root(settings), or DATA_ROOT when none is given. Reject malformed fields
     and unintended overwrite of the frozen evidence file; never save private keys.
     Serialise as json.dumps(card, indent=2, ensure_ascii=False) plus one trailing newline, encode UTF-8
     and write in binary mode (never write_text). That reproduces data/examples/vaccination_record.json
@@ -47,8 +54,7 @@ def save_record(path: Path, card: VaccinationCard) -> None:
     3f2242f3cce59c18d546a104712ece887fdaf0563cd6bd3f4cb5c932cc6ec5b9.
     """
     target = Path(path).resolve()
-    if DATA_ROOT.resolve() not in target.parents:
-        raise RecordError("record path must be inside the data root")
+    _check_inside(target, DATA_ROOT if root is None else root)
     try:
         raw_bytes = (json.dumps(card, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
     except (TypeError, ValueError, RecursionError):
@@ -98,7 +104,7 @@ def parse_record(raw_bytes: bytes) -> VaccinationCard:
 
 def generate_salt() -> bytes:
     """Generate exactly 32 cryptographically random bytes for one frozen commitment.
-    Use the standard secrets module during implementation; do not reuse fixed fixture salts.
+    Use the standard secrets module; do not reuse fixed fixture salts.
     """
     return secrets.token_bytes(SALT_LENGTH)
 
@@ -107,11 +113,12 @@ def save_salt(path: Path, salt: bytes) -> None:
     """Validate length and save the private salt locally as base64 metadata.
     Never include it in contract calls, ordinary logs or requester responses.
     File format (every salt file, vaccination and identity): {"salt_b64": "<44-char base64 of 32 bytes>"}.
+    The file is created with mode SALT_FILE_MODE (0600), so other local users cannot read it.
     """
     if not isinstance(salt, bytes) or len(salt) != SALT_LENGTH:
         raise RecordError("salt must be exactly 32 bytes")
     text = json.dumps({"salt_b64": base64.b64encode(salt).decode("ascii")}) + "\n"
-    _write_new(Path(path), text.encode("ascii"), "salt file already exists")
+    _write_new(Path(path), text.encode("ascii"), "salt file already exists", SALT_FILE_MODE)
 
 
 def load_salt(path: Path) -> bytes:
@@ -175,8 +182,40 @@ def prepare_identity(identity_path: Path, salt_path: Path) -> bytes:
 
 
 def settings_path(settings: dict[str, Any], key: str) -> Path:
-    """Resolve one path setting against the project root."""
+    """Resolve one path setting against the project root. An absolute path is used as given."""
     return PROJECT_ROOT / settings[key]
+
+
+def data_root(settings: dict[str, Any]) -> Path:
+    """The configured data root: settings data_root resolved like every path setting (relative to the
+    project root, an absolute path as given), or DATA_ROOT (<project>/runtime-data) when settings have none.
+    A data_root that is not a nonempty path raises RecordError.
+    """
+    if "data_root" not in settings:
+        return DATA_ROOT
+    value = settings["data_root"]
+    if not isinstance(value, str) or not value.strip():
+        raise RecordError("invalid setting: data_root")
+    return settings_path(settings, "data_root")
+
+
+def shown_path(path: Path, settings: dict[str, Any] | None = None) -> str:
+    """A path for console text that never shows the home folder or the user name: relative to the project
+    root when inside it, else as <data_root>/... when inside data_root(settings), else only the file name.
+    """
+    target = Path(path).resolve()
+    try:
+        return target.relative_to(PROJECT_ROOT.resolve()).as_posix()
+    except ValueError:
+        pass
+    if settings is not None:
+        try:
+            inside = target.relative_to(data_root(settings).resolve()).as_posix()
+        except (RecordError, KeyError, TypeError, ValueError):
+            inside = None
+        if inside is not None:
+            return "<data_root>" if inside == "." else f"<data_root>/{inside}"
+    return target.name
 
 
 def identity_paths(settings: dict[str, Any], label: str) -> tuple[Path, Path]:
@@ -191,7 +230,12 @@ def identity_paths(settings: dict[str, Any], label: str) -> tuple[Path, Path]:
 def setup_runtime(settings: dict[str, Any]) -> list[Path]:
     """Copy the example identities and card into the runtime folders and give each file its own salt.
     Repeatable: files that already exist are left alone. Returns the files it created.
+    The record goes to vaccination_file, which must be inside data_root(settings); otherwise nothing is created.
     """
+    root = data_root(settings)
+    record_path = settings_path(settings, "vaccination_file")
+    if not record_path.exists():
+        _check_inside(record_path.resolve(), root)
     created = []
     for label in REGISTERING_LABELS:
         identity_path, _ = identity_paths(settings, label)
@@ -200,10 +244,9 @@ def setup_runtime(settings: dict[str, Any]) -> list[Path]:
             _check_identity(raw_bytes)
             _write_new(identity_path, raw_bytes, "identity already exists")
             created.append(identity_path)
-    record_path = settings_path(settings, "vaccination_file")
     if not record_path.exists():
         example = _read_once(EXAMPLES_DIR / "vaccination_record.json", "example record unavailable")
-        save_record(record_path, parse_record(example))
+        save_record(record_path, parse_record(example), root)
         created.append(record_path)
     salt_paths = [identity_paths(settings, label)[1] for label in REGISTERING_LABELS]
     salt_paths.append(settings_path(settings, "vaccination_salt_file"))
@@ -212,6 +255,12 @@ def setup_runtime(settings: dict[str, Any]) -> list[Path]:
             save_salt(salt_path, generate_salt())
             created.append(salt_path)
     return created
+
+
+def _check_inside(target: Path, root: Path) -> None:
+    # target is already resolved; the root itself does not count as inside
+    if Path(root).resolve() not in target.parents:
+        raise RecordError("record path must be inside the data root")
 
 
 def _read_once(path: Path, message: str) -> bytes:
@@ -223,11 +272,12 @@ def _read_once(path: Path, message: str) -> bytes:
     raise RecordError(message)
 
 
-def _write_new(path: Path, data: bytes, exists_message: str) -> None:
-    # "xb" writes bytes and refuses to replace a file that is already there
+def _write_new(path: Path, data: bytes, exists_message: str, mode: int = 0o666) -> None:
+    # O_EXCL refuses to replace a file that is already there; mode is before the umask, as for open()
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "xb") as file:
+        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), mode)
+        with open(descriptor, "wb") as file:
             file.write(data)
         return
     except FileExistsError:

@@ -1,12 +1,12 @@
+# AI assistance: parts of this file were written with Claude (Anthropic) and thoroughly reviewed.
 """Tests for perform_access and its two wrappers in app/disclosure.py, run against the fake chain.
-AI note: parts of this file were written with help from Claude and checked by hand.
 """
 import unittest
 
 from app import disclosure, records
 from app.models import (
-    Scope, ChainUnavailable, TransactionRejected, TransactionPending,
-    OUTCOME_ALLOWED, OUTCOME_DENIED, OUTCOME_UNAVAILABLE, OUTCOME_PENDING,
+    Scope, ChainUnavailable, Web3NotInstalled, DeploymentUnavailable, ArtifactUnavailable, TransactionRejected,
+    TransactionPending, OUTCOME_ALLOWED, OUTCOME_DENIED, OUTCOME_UNAVAILABLE, OUTCOME_PENDING,
 )
 from tests.fake_chain import FakeChain, install, prepare_demo, ZERO_HASH, DAY
 from tests.support import temp_runtime
@@ -83,6 +83,8 @@ class ReleaseRuleTests(AccessTestCase):
         self.assertEqual(response["reason"], "HASH_MISMATCH")
         self.assertEqual(self.sent_hashes(), [ZERO_HASH])
         self.assert_nothing_released(response)
+        # the request was logged, so the console blames the local record, not the node
+        self.assertEqual(disclosure.denial_message(response), disclosure.RECORD_UNAVAILABLE_MESSAGE)
 
     def test_missing_salt_sends_the_zero_hash(self):
         self.grant(self.school, Scope.MEASLES_STATUS)
@@ -187,6 +189,10 @@ class FailureTests(AccessTestCase):
                 response = self.school_check()
                 self.assertEqual(response["outcome"], outcome)
                 self.assert_nothing_released(response)
+                # nothing confirmed on-chain, and the local record was fine: never "local record could not be verified"
+                self.assertEqual(response["transaction_hash"], "")
+                expected = disclosure.CHAIN_UNAVAILABLE_MESSAGE if outcome == OUTCOME_UNAVAILABLE else "pending: not confirmed, nothing released"
+                self.assertEqual(disclosure.denial_message(response), expected)
 
     def test_late_request_failing_still_releases_nothing(self):
         self.grant(self.school, Scope.MEASLES_STATUS)
@@ -201,9 +207,26 @@ class FailureTests(AccessTestCase):
         self.assertEqual(response["outcome"], OUTCOME_PENDING)
         self.assert_nothing_released(response)
 
+    def test_missing_deployment_is_passed_on_and_nothing_is_sent(self):
+        # the console then says how to deploy, instead of blaming the local record
+        self.grant(self.school, Scope.MEASLES_STATUS)
+        self.fake.failures["load_contract"] = DeploymentUnavailable()
+        with self.assertRaises(DeploymentUnavailable):
+            self.school_check()
+        self.assertEqual(self.fake.calls_to("request_access"), [])
+
+    def test_missing_artifacts_and_web3_are_passed_on(self):
+        self.grant(self.school, Scope.MEASLES_STATUS)
+        for name, error in (("load_contract", ArtifactUnavailable()), ("connect", Web3NotInstalled())):
+            with self.subTest(type(error).__name__):
+                self.fake.failures[name] = error
+                with self.assertRaises(type(error)):
+                    self.school_check()
+        self.assertEqual(self.fake.calls_to("request_access"), [])
+
     def test_not_implemented_is_passed_on(self):
         self.grant(self.school, Scope.MEASLES_STATUS)
-        self.fake.failures["check_access"] = NotImplementedError("check_access is an implementation task")
+        self.fake.failures["check_access"] = NotImplementedError("check_access is not implemented")
         with self.assertRaises(NotImplementedError):
             self.school_check()
 

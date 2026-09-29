@@ -1,5 +1,7 @@
 # Developer 5: Research, documentation and submission
 
+Status (2026-09-28): open: report, slides and the README run. The evidence to cite is listed in [REPORT_OUTLINE.md](../REPORT_OUTLINE.md).
+
 ## Files
 
 Report PDF (outline in docs/REPORT_OUTLINE.md); diagrams in docs/ARCHITECTURE.md; README; test and measurement results in evaluation/results/*.csv; presentation and docs/DEMO.md. Choose final file formats to match the coursebook.

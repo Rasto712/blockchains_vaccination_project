@@ -46,4 +46,4 @@ sequenceDiagram
     end
 ```
 
-Well-formed business denial must eventually return false with an event, not revert. Current placeholder methods deliberately revert until implemented; do not confuse that with final denial behavior. Malformed transactions/RPC failures cannot create on-chain events. An event records authorization, not physical delivery. Revocation cannot retract already-disclosed data.
+Well-formed business denial returns false with an event, not a revert: requestAccess emits exactly one AccessAttempt per call, allowed or denied. Reverts are kept for malformed or unauthorized transactions (for example NotTrustedClinic, InvalidDuration), which leave no event. Malformed transactions/RPC failures cannot create on-chain events. An event records authorization, not physical delivery. Revocation cannot retract already-disclosed data.

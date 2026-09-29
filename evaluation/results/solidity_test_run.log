@@ -1,0 +1,51 @@
+No contracts to compile
+
+Running Solidity tests
+
+  test/ConsentRewardToken.t.sol:ConsentRewardTokenTest
+    ✔ testTokenIsNonTransferable()
+    ✔ testRejectZeroRecipient()
+    ✔ testOnlyDeployerCanConfigureMinterOnce()
+    ✔ testOnlyConfiguredManagerCanMint()
+    ✔ testMintAddsOneUnitAndEmitsEvent()
+    ✔ testDeployerHasNoOngoingPower()
+    ✔ testBalanceDoesNotAuthorizeAccess()
+
+  test/IdentityRegistry.t.sol:IdentityRegistryTest
+    ✔ testRetrieveReferencesContainsNoPlaintext()
+    ✔ testRejectMissingGuardianOrReplacementHash()
+    ✔ testRejectDuplicateOrZeroRegistration()
+    ✔ testRegisterUserStoresHash()
+    ✔ testOnlyTrustedClinicCanAttest()
+    ✔ testIdentityCommitmentsAreNotUnique()
+    ✔ testGetUserInfoForUnregisteredAndUnattestedAccounts()
+    ✔ testConstructorRejectsZeroClinicAndStoresClinic()
+    ✔ testAttestationAndRegistrationRevertOrder()
+
+  test/ConsentManager.t.sol:ConsentManagerTest
+    ✔ testWrongRequesterAndUnsupportedScopeAreLoggedDenied()
+    ✔ testValidAccessEmitsAuditWithoutReward()
+    ✔ testUnregisteredOrMissingEvidenceIsLoggedDenied()
+    ✔ testRewardLimitIsPerTupleOnly()
+    ✔ testRewardFailureRollsBackGrant()
+    ✔ testRevocationIsIdempotentAndBlocksAccess()
+    ✔ testRejectActiveDuplicateGrant()
+    ✔ testRegrantDoesNotRepeatReward()
+    ✔ testRegisteredGuardianCanGrant()
+    ✔ testReasonCodesAreFrozen()
+    ✔ testHashMismatchAndZeroObservedHashAreDenied()
+    ✔ testGrantRequiresRegisteredPartiesAndSupportedScope()
+    ✔ testGrantAndRevokeRevertOrder()
+    ✔ testExpiryRegrantDoesNotRepeatReward()
+    ✔ testExactExpiryBoundaryIsDenied()
+    ✔ testDurationBounds()
+    ✔ testDifferentRequesterOrScopeEarnsOwnReward()
+    ✔ testDenialPrecedence()
+    ✔ testDemoStorylineEndToEnd()
+    ✔ testConstructorRejectsInvalidDependencies()
+    ✔ testConsentStateUsesOneStorageSlot()
+    ✔ testCallerCannotChangeAnotherOwnersConsent()
+
+
+  38 passing
+

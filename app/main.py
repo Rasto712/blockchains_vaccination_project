@@ -1,9 +1,10 @@
-"""Developer 3: plain console workflow for the local demo.
+# AI assistance: parts of this file were written with Claude (Anthropic) and thoroughly reviewed.
+"""Plain console workflow for the local demo.
 One menu covers setup, register, attest, grant, revoke, school check, doctor view, rewards and audit.
 The tamper and exact-expiry steps run in integration/demo_workflow.py instead.
 Exception text is never printed, only a short outcome or the error name. The one exception is
-RecordError, whose messages never hold data, salts or paths.
-AI note: parts of this file were written with help from Claude and checked by hand.
+RecordError, whose messages never hold data, salts or paths. File paths are shown relative to the project
+or as <data_root>/..., never with the home folder.
 """
 import json
 from datetime import datetime, timezone
@@ -11,7 +12,8 @@ from pathlib import Path
 from typing import Any
 from app import chain, disclosure, records
 from app.models import (
-    Scope, Reason, AccessResponse, ChainUnavailable, TransactionRejected, TransactionPending, OUTCOME_ALLOWED,
+    Scope, Reason, AccessResponse, ChainUnavailable, Web3NotInstalled, DeploymentUnavailable, ArtifactUnavailable,
+    TransactionRejected, TransactionPending, OUTCOME_ALLOWED,
 )
 
 SETTINGS_FILE = records.PROJECT_ROOT / "config" / "settings.json"
@@ -33,7 +35,7 @@ ACTIONS = (
 
 def show_menu() -> str:
     """Show actions for register, clinic-attest, grant, revoke, school-check, doctor-view, rewards and audit.
-    Return a validated choice. Do not implement a website or complex UI.
+    Return a validated choice. 
     """
     print()
     for number, (_, text) in enumerate(ACTIONS, 1):
@@ -51,7 +53,7 @@ def select_actor(settings: dict[str, Any]) -> str:
 def dispatch_action(choice: str, actor_label: str, settings: dict[str, Any]) -> None:
     """Connect one menu choice to records/chain/disclosure helpers.
     Handle pending, denied and unavailable outcomes distinctly without exposing private data.
-    "not implemented yet" is only a console message for NotImplementedError, not an outcome.
+    "not implemented" is only a console message for NotImplementedError, not an outcome.
     """
     handler = HANDLERS.get(choice)
     if handler is None:
@@ -64,6 +66,14 @@ def dispatch_action(choice: str, actor_label: str, settings: dict[str, Any]) -> 
         raise
     except NotImplementedError:
         print(disclosure.NOT_IMPLEMENTED_MESSAGE)
+    except ArtifactUnavailable:
+        # deploy_local would stop at the same missing artifact, so name the step before it
+        print(f"unavailable: {disclosure.NO_ARTIFACTS_MESSAGE}")
+    except DeploymentUnavailable:
+        # the node answered; deployment.json is missing, stale or for other contracts
+        print(f"unavailable: {disclosure.NO_DEPLOYMENT_MESSAGE}")
+    except Web3NotInstalled:
+        print(f"unavailable: {disclosure.NO_WEB3_MESSAGE}")
     except ChainUnavailable:
         print("unavailable: local node not reachable or wrong chain")
     except TransactionPending:
@@ -145,11 +155,9 @@ def record_snapshot(settings: dict[str, Any]) -> Any:
     )
 
 
-def shown_path(path: Path) -> str:
-    try:
-        return str(path.relative_to(records.PROJECT_ROOT))
-    except ValueError:
-        return str(path)
+def shown_path(path: Path, settings: dict[str, Any] | None = None) -> str:
+    # relative to the project, <data_root>/..., or the file name: never the home folder
+    return records.shown_path(path, settings)
 
 
 def scope_name(value: int) -> str:
@@ -174,7 +182,7 @@ def do_setup(actor_label: str, settings: dict[str, Any]) -> None:
     if not created:
         print("setup: every local file already exists, nothing changed")
     for path in created:
-        print(f"setup: created {shown_path(path)}")
+        print(f"setup: created {shown_path(path, settings)}")
 
 
 def do_register(actor_label: str, settings: dict[str, Any]) -> None:
@@ -279,6 +287,15 @@ def do_show_registration(actor_label: str, settings: dict[str, Any]) -> None:
         info = chain.get_user_info(contract(client, "IdentityRegistry", settings), account=account)
     except NotImplementedError:
         print(f"on-chain: {disclosure.NOT_IMPLEMENTED_MESSAGE}")
+        return
+    except ArtifactUnavailable:
+        print(f"on-chain: {disclosure.NO_ARTIFACTS_MESSAGE}")
+        return
+    except DeploymentUnavailable:
+        print(f"on-chain: {disclosure.NO_DEPLOYMENT_MESSAGE}")
+        return
+    except Web3NotInstalled:
+        print(f"on-chain: {disclosure.NO_WEB3_MESSAGE}")
         return
     except ChainUnavailable:
         print("on-chain: local node not reachable")

@@ -1,6 +1,8 @@
 # Five developer assignments
 
-The Python side is implemented; the contracts, chain.py, the deploy script, the measurements and most of the scripted demo are still scaffold stubs. Read developer_plan.pdf for the full architecture; where it differs from the Markdown docs or code docstrings, the Markdown docs and docstrings win.
+Status (2026-09-28): the code is complete. The three contracts pass the 38 Solidity tests, the Python side passes 337 unit tests, and the deploy script, the scripted demo and the measurements run on a local node (commands in the [README](../README.md)). Still open: the report and slides, and rerunning the three result commands (`python -m evaluation.export_solidity_results`, `python -m evaluation.measure` and `python -m evaluation.export_python_results`) once the changes are committed ([TESTING.md](TESTING.md)).
+
+Read developer_plan.pdf for the full architecture; where it differs from the Markdown docs or code docstrings, the Markdown docs and docstrings win.
 
 | Developer | Responsibility | Current owner |
 | --- | --- | --- |

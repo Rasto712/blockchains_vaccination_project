@@ -1,0 +1,54 @@
+requester_count,operation,scenario,sample_count,average_gas_used,average_receipt_seconds,average_event_seconds,failures,notes
+1,deployer: deploy IdentityRegistry,fresh deployment for the run,1,236456,0.012873,,0,"send to verified deploy, not send to receipt: timed around deploy_local's verified step (artifact file read, send, receipt, runtime code read back, and trustedClinic() for the registry); a constructor emits no event"
+1,deployer: deploy ConsentRewardToken,fresh deployment for the run,1,233933,0.008340,,0,"send to verified deploy, not send to receipt: timed around deploy_local's verified step (artifact file read, send, receipt, runtime code read back, and trustedClinic() for the registry); a constructor emits no event"
+1,deployer: deploy ConsentManager,fresh deployment for the run,1,598640,0.009569,,0,"send to verified deploy, not send to receipt: timed around deploy_local's verified step (artifact file read, send, receipt, runtime code read back, and trustedClinic() for the registry); a constructor emits no event"
+1,deployer: setMinterOnce,one-time minter setup (ConsentManager),1,47919,0.014545,0.015996,0,"timed around deploy_local.configure_minter (artifact file read, send, receipt, minter() read back) before MinterConfigured is decoded"
+1,guardian: registerUser,registers a synthetic identity hash,1,45430,0.008033,0.008225,0,
+1,requester: registerUser,registers a synthetic identity hash,1,45418,0.007285,0.007429,0,
+1,requester: requestAccess,"denied MISSING_EVIDENCE (both registered, record not attested yet)",1,38821,0.007974,0.008370,0,
+1,clinic: registerVaccination,attests the guardian's synthetic record hash,1,48545,0.007354,0.007528,0,
+1,requester: requestAccess,"denied NO_CONSENT (attested, never granted)",1,41314,0.007364,0.007631,0,
+1,guardian: grantConsent,"first rewarded grant, first reward of the deployment (30 days)",1,111835,0.008103,0.008425,0,
+1,requester: requestAccess,"allowed (active grant, matching hash)",1,41483,0.007342,0.007601,0,
+1,requester: requestAccess,"denied HASH_MISMATCH (active grant, one byte of the hash changed)",1,41498,0.007345,0.007604,0,
+1,guardian: revokeConsent,revoke an active grant,1,29714,0.007443,0.007641,0,
+1,requester: requestAccess,denied REVOKED (grant revoked),1,41457,0.007551,0.007834,0,
+1,guardian: grantConsent,unrewarded regrant after revoke (1 day),1,43347,0.007743,0.007978,0,
+1,requester: requestAccess,"denied EXPIRED (1-day regrant, node time moved to its expiry)",1,41479,0.007606,0.007884,0,
+1,guardian: grantConsent,unrewarded regrant after expiry (30 days),1,43463,0.007564,0.007778,0,
+5,deployer: deploy IdentityRegistry,fresh deployment for the run,1,236456,0.010935,,0,"send to verified deploy, not send to receipt: timed around deploy_local's verified step (artifact file read, send, receipt, runtime code read back, and trustedClinic() for the registry); a constructor emits no event"
+5,deployer: deploy ConsentRewardToken,fresh deployment for the run,1,233933,0.008115,,0,"send to verified deploy, not send to receipt: timed around deploy_local's verified step (artifact file read, send, receipt, runtime code read back, and trustedClinic() for the registry); a constructor emits no event"
+5,deployer: deploy ConsentManager,fresh deployment for the run,1,598628,0.008438,,0,"send to verified deploy, not send to receipt: timed around deploy_local's verified step (artifact file read, send, receipt, runtime code read back, and trustedClinic() for the registry); a constructor emits no event"
+5,deployer: setMinterOnce,one-time minter setup (ConsentManager),1,47919,0.010110,0.010252,0,"timed around deploy_local.configure_minter (artifact file read, send, receipt, minter() read back) before MinterConfigured is decoded"
+5,guardian: registerUser,registers a synthetic identity hash,1,45430,0.007233,0.007405,0,
+5,requester: registerUser,registers a synthetic identity hash,5,45430,0.006958,0.007099,0,
+5,requester: requestAccess,"denied MISSING_EVIDENCE (both registered, record not attested yet)",5,38821,0.007094,0.007363,0,
+5,clinic: registerVaccination,attests the guardian's synthetic record hash,1,48545,0.007082,0.007254,0,
+5,requester: requestAccess,"denied NO_CONSENT (attested, never granted)",5,41314,0.007104,0.007357,0,
+5,guardian: grantConsent,"first rewarded grant, first reward of the deployment (30 days)",1,111835,0.007726,0.008040,0,
+5,guardian: grantConsent,"first rewarded grant, guardian already holds rewards (30 days)",4,77635,0.007953,0.008261,0,
+5,requester: requestAccess,"allowed (active grant, matching hash)",5,41483,0.007165,0.007427,0,
+5,requester: requestAccess,"denied HASH_MISMATCH (active grant, one byte of the hash changed)",5,41498,0.007178,0.007444,0,
+5,guardian: revokeConsent,revoke an active grant,5,29714,0.007352,0.007539,0,
+5,requester: requestAccess,denied REVOKED (grant revoked),5,41457,0.007051,0.007309,0,
+5,guardian: grantConsent,unrewarded regrant after revoke (1 day),5,43347,0.006969,0.007163,0,
+5,requester: requestAccess,"denied EXPIRED (1-day regrant, node time moved to its expiry)",5,41479,0.007384,0.007654,0,
+5,guardian: grantConsent,unrewarded regrant after expiry (30 days),5,43463,0.006954,0.007147,0,
+10,deployer: deploy IdentityRegistry,fresh deployment for the run,1,236456,0.010653,,0,"send to verified deploy, not send to receipt: timed around deploy_local's verified step (artifact file read, send, receipt, runtime code read back, and trustedClinic() for the registry); a constructor emits no event"
+10,deployer: deploy ConsentRewardToken,fresh deployment for the run,1,233933,0.007747,,0,"send to verified deploy, not send to receipt: timed around deploy_local's verified step (artifact file read, send, receipt, runtime code read back, and trustedClinic() for the registry); a constructor emits no event"
+10,deployer: deploy ConsentManager,fresh deployment for the run,1,598640,0.008282,,0,"send to verified deploy, not send to receipt: timed around deploy_local's verified step (artifact file read, send, receipt, runtime code read back, and trustedClinic() for the registry); a constructor emits no event"
+10,deployer: setMinterOnce,one-time minter setup (ConsentManager),1,47919,0.009627,0.009762,0,"timed around deploy_local.configure_minter (artifact file read, send, receipt, minter() read back) before MinterConfigured is decoded"
+10,guardian: registerUser,registers a synthetic identity hash,1,45430,0.006769,0.006930,0,
+10,requester: registerUser,registers a synthetic identity hash,10,45428.8,0.006655,0.006789,0,"gasUsed 45,418-45,430"
+10,requester: requestAccess,"denied MISSING_EVIDENCE (both registered, record not attested yet)",10,38821,0.007303,0.007566,0,
+10,clinic: registerVaccination,attests the guardian's synthetic record hash,1,48545,0.006723,0.006897,0,
+10,requester: requestAccess,"denied NO_CONSENT (attested, never granted)",10,41314,0.006737,0.006984,0,
+10,guardian: grantConsent,"first rewarded grant, first reward of the deployment (30 days)",1,111835,0.007409,0.007731,0,
+10,guardian: grantConsent,"first rewarded grant, guardian already holds rewards (30 days)",9,77633.7,0.007601,0.007893,0,"gasUsed 77,623-77,635"
+10,requester: requestAccess,"allowed (active grant, matching hash)",10,41483,0.006838,0.007091,0,
+10,requester: requestAccess,"denied HASH_MISMATCH (active grant, one byte of the hash changed)",10,41498,0.006785,0.007034,0,
+10,guardian: revokeConsent,revoke an active grant,10,29712.8,0.006799,0.006967,0,"gasUsed 29,702-29,714"
+10,requester: requestAccess,denied REVOKED (grant revoked),10,41457,0.006857,0.007105,0,
+10,guardian: grantConsent,unrewarded regrant after revoke (1 day),10,43345.8,0.006834,0.007019,0,"gasUsed 43,335-43,347"
+10,requester: requestAccess,"denied EXPIRED (1-day regrant, node time moved to its expiry)",10,41479,0.006810,0.007065,0,
+10,guardian: grantConsent,unrewarded regrant after expiry (30 days),10,43461.8,0.006949,0.007142,0,"gasUsed 43,451-43,463"
