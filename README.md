@@ -1,16 +1,14 @@
 # My Vaccination Card
 
-**Architecture:** three Solidity contracts, a Python console and local JSON on a local Hardhat network.
+AI assistance: parts of this project were written with Claude (Anthropic) and thoroughly reviewed.
 
-## Status (2026-09-28)
+A guardian keeps a child's vaccination card as a local JSON file and decides who may check it. Three Solidity contracts run on a local Hardhat node:
 
-Everything in the plan is implemented and runs on a local Hardhat node:
+- IdentityRegistry stores each registered account's salted identity hash and one vaccination-record commitment per guardian, attested only by a fixed trusted clinic.
+- ConsentManager holds the guardian's scoped, time-limited grants (1-365 days) and revocations, and emits one AccessAttempt event for every access request, allowed or denied.
+- ConsentRewardToken keeps non-transferable reward units: only ConsentManager mints them, one per first grant of an owner/requester/scope.
 
-- Contracts: IdentityRegistry, ConsentManager and a non-transferable ConsentRewardToken. The 38 Solidity tests pass.
-- Python: records, salts and commitments (app/records.py), the release rule and the school and doctor views (app/disclosure.py), the menu (app/main.py) and the web3 boundary (app/chain.py). 337 unit tests pass without a node; the ones that touch the chain use a fake (tests/fake_chain.py) or mock web3.
-- scripts/deploy_local.py deploys the three contracts, integration/demo_workflow.py runs the whole story with checked outcomes, and evaluation/ writes the measured gas and timing tables, the Solidity test results (SOL rows) and the live Python check results (PY rows).
-
-Still open: the report and slides, and rerunning the three result commands (steps 7-9 below) once the current changes are committed, so the results name a clean commit. On 2026-09-28 Magdy completed the remaining parts with AI assistance, as disclosed in each changed file (the code headers, and the last line of the rewritten docs); [team assignments](docs/TEAM_TASKS.md) has the details and the original owners.
+A Python console (app/main.py, with web3) acts as clinic, guardian, school or doctor. Privacy model: the card, the identities and the salts stay in local files, and the chain holds only salted SHA-256 commitments and consent and audit metadata. For each request Python hashes the local copy, logs the attempt on-chain, compares the hash with the attested commitment, rechecks consent and releases only the fields of that scope: measles status for the school, vaccine and date for the doctor.
 
 ## Project layout
 
@@ -23,19 +21,22 @@ scripts/         deploy_local.py: deploys the contracts and writes deployment.js
 integration/     demo_workflow.py: the scripted end-to-end demo
 evaluation/      measure.py, export_solidity_results.py, export_python_results.py, templates/ (headers only) and results/
 config/          settings.example.json (copy to settings.json) and deployment.example.json (shape only)
-data/examples/   Synthetic local vaccination and identity fixtures
+data/            README.md (local data format) and examples/: synthetic vaccination and identity fixtures
 runtime-data/    Git ignored. Setup makes the frozen record, identities and salts; deploy_local.py adds deployment.json
-docs/            Revised PDF, architecture, contract API, developer tasks, handoff notes, demo, testing and report outline
+docs/            ARCHITECTURE.md, CONTRACT_API.md, TESTING.md, DEMO.md
 ```
 
-## Start here
+## Documentation
 
-1. Read [developer plan](docs/developer_plan.pdf), [team assignments](docs/TEAM_TASKS.md) and [architecture](docs/ARCHITECTURE.md). Where developer_plan.pdf differs from the Markdown docs or code docstrings, the Markdown docs and docstrings win.
-2. The [contract API](docs/CONTRACT_API.md) has the agreed functions, events, errors and revert orders.
-3. Use [validation and evidence](docs/TESTING.md), [report outline](docs/REPORT_OUTLINE.md) and [demo checklist](docs/DEMO.md).
-4. Handoff notes: [Dev 1](docs/FOR_DEV_1.md), [Dev 2](docs/FOR_DEV_2.md), [Dev 4](docs/FOR_DEV_4.md), [Dev 5](docs/FOR_DEV_5.md) and [from Dev 2](docs/FROM_DEV_2.md).
+- [Architecture](docs/ARCHITECTURE.md): the components, the access flow and what Python and the contracts each enforce.
+- [Contract API](docs/CONTRACT_API.md): functions, events, errors, reason codes and revert orders.
+- [Testing](docs/TESTING.md): the Solidity and Python tests, their IDs, and how the measurements and results are made.
+- [Demo walkthrough](docs/DEMO.md): the demo story step by step.
+- [evaluation/results/](evaluation/results/): the recorded gas and timing tables, the Solidity (SOL) and Python (PY) test results, and [ENVIRONMENT.md](evaluation/results/ENVIRONMENT.md) with the machine, node and commit they came from.
 
 ## Run
+
+A fresh copy of the project has no node_modules/, .venv/ or compiled artifacts/ (all git ignored), so run steps 1 and 2 before anything else.
 
 From the project root, in this order. Needs Node 22.13 or newer and Python 3.10 or newer: the Python code uses 3.10 syntax, and web3 8 needs 3.10 too. Run Python files with -m from the project root (for example `python -m integration.demo_workflow`), because running a file by its path cannot find the app package.
 
@@ -63,7 +64,7 @@ cp config/settings.example.json config/settings.json
 
 Use whichever Python 3.10+ you have in the first line (`python3.12`, `python3.11`, ...). The macOS system `python3` is 3.9: pip finds no web3 8.0.0 for it, and even the menu stops with a TypeError, because the code uses 3.10 syntax. The unit tests need no node and should end with `Ran 337 tests` and `OK`. requirements.txt installs web3 8.0.0, which every chain action needs; without it the 86 tests that need web3 are skipped, and the chain commands say "web3 not installed: run python -m pip install -r requirements.txt with the venv's Python".
 
-Windows PowerShell (no activation needed; not re-checked on 2026-09-28):
+Windows PowerShell (no activation needed; not tested on this version):
 
 ```powershell
 py -3 -m venv .venv
@@ -78,7 +79,7 @@ config/settings.json is your local copy (git ignored):
 - actor_account_indices maps deployer, clinic, guardian, school and doctor to the node's accounts 0-4, and scenario_requester_account_indices (5-14) are the extra requesters for the measurements.
 - Paths are relative to the project root; an absolute path is used as given.
 - data_root (runtime-data by default) is the folder the frozen record must be inside. Setup refuses a vaccination_file outside it ("record path must be inside the data root") and creates nothing, and the demo's tamper copy goes to `<data_root>/tamper/`. To keep the local files outside the repo, point data_root and the five other path settings (deployment_file, vaccination_file, vaccination_salt_file, identity_directory, identity_salt_directory) at one folder together.
-- The menu reads only config/settings.json; the other Python commands take `--settings PATH`.
+- The menu reads only config/settings.json; deploy, the demo, the measurement and the Python check export take `--settings PATH`.
 
 ### 3. Local node
 
@@ -181,14 +182,14 @@ Needs the node (chain 31337 only) and takes `--settings PATH` and `--output PATH
 
 ## Hardhat build setup
 
-package.json pins Hardhat 3.18.0 and forge-std; hardhat.config.ts pins solc 0.8.28 (optimiser on, 200 runs). If Lab 3 uses another Hardhat 3 version, change package.json and hardhat.config.ts together. npm ci uses the committed package-lock.json, so git and SSH keys are not needed (forge-std comes from GitHub over HTTPS). Use npm install only when changing dependencies, then commit the new lockfile. An npm 11 warning that esbuild and fsevents have install scripts not covered by allowScripts is harmless. The only TypeScript file is the Hardhat configuration; there is no frontend.
+package.json pins Hardhat 3.18.0 and forge-std; hardhat.config.ts pins solc 0.8.28 (optimiser on, 200 runs). To use another Hardhat 3 version, change package.json and hardhat.config.ts together. npm ci uses the committed package-lock.json, so git and SSH keys are not needed (forge-std comes from GitHub over HTTPS). Use npm install only when changing dependencies, then commit the new lockfile. An npm 11 warning that esbuild and fsevents have install scripts not covered by allowScripts is harmless. The only TypeScript file is the Hardhat configuration; there is no frontend.
 
-## Rules that must survive implementation
+## Design rules
 
 - Child data stays in local JSON. Store only salted identity/record commitments and permission/audit metadata on-chain.
 - Guardian controls its own grants; clinic alone attests; requester identity comes from the transaction signer.
 - Duration is 1-365 whole days; consent is invalid at the exact expiry timestamp.
-- Both allowed and denied access attempts need committed events. Remove placeholder reverts from the final business-denial path, since reverting would erase events.
+- Allowed and denied access attempts both leave a committed event: a well-formed business denial returns allowed = false and a reason instead of reverting, because a revert would erase the event.
 - Reward once per lifetime owner/requester/scope tuple. No tokens move during access; reward balances never authorize access.
 - School sees status only; doctor sees vaccine/date only. Failed evidence is unavailable, not a clinical NO.
 
@@ -196,7 +197,3 @@ package.json pins Hardhat 3.18.0 and forge-std; hardhat.config.ts pins solc 0.8.
 
 - https://hardhat.org/docs/reference/configuration
 - https://hardhat.org/docs/guides/testing/using-solidity
-
-docs/SCAFFOLD_VALIDATION.md records the checks made on the original scaffold; the current checks are in docs/TESTING.md. Compiler success is not functional correctness.
-
-AI assistance: the status, run and troubleshooting sections were written with Claude (Anthropic); review before submission.

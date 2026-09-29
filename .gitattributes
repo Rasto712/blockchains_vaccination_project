@@ -1,1 +1,11 @@
 *.json text eol=lf
+
+# Team-internal docs: kept in the repo, left out of `git archive` submission zips
+docs/FOR_DEV_*.md export-ignore
+docs/FROM_DEV_2.md export-ignore
+docs/TEAM_TASKS.md export-ignore
+docs/tasks export-ignore
+docs/REPORT_OUTLINE.md export-ignore
+docs/SCAFFOLD_VALIDATION.md export-ignore
+docs/UI_HANDOFF.md export-ignore
+docs/developer_plan.pdf export-ignore
