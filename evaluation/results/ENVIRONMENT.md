@@ -2,16 +2,16 @@
 
 Local demo measurements: one machine, one local Hardhat node with automine, transactions sent one at a time. They are not public-chain throughput, latency or fee figures, and no gas is converted to ETH or money.
 
-Written by `python -m evaluation.measure --settings PATH` on 2026-09-28 23:28 UTC, at commit a635a30 + uncommitted changes. Uncommitted changes are looked for under contracts, app, scripts, evaluation/measure.py, hardhat.config.ts, package.json.
+Written by `python -m evaluation.measure --settings PATH` on 2026-09-29 07:48 UTC, at commit 39208bb. Uncommitted changes are looked for under contracts, app, scripts, evaluation/measure.py, hardhat.config.ts, package.json.
 
 ## Compiler
 
-- solc 0.8.28, optimiser on, 200 runs (hardhat.config.ts). This line goes under the gas table.
-- solc 0.8.28+commit.7893614a, optimiser on, 200 runs, EVM cancun: IdentityRegistry (solc-0_8_28-e3c23e288422f90113447449891057ea1dcd1b59), ConsentRewardToken (solc-0_8_28-e3c23e288422f90113447449891057ea1dcd1b59), ConsentManager (solc-0_8_28-e3c23e288422f90113447449891057ea1dcd1b59)
+- solc 0.8.28, optimiser on, 200 runs (hardhat.config.ts).
+- solc 0.8.28+commit.7893614a, optimiser on, 200 runs, EVM cancun: IdentityRegistry (solc-0_8_28-25297f9aac4d7058526cfd8d1baf52b0e196e4ca), ConsentRewardToken (solc-0_8_28-df718c32f49d73ab56ebbd62abe428136371c267), ConsentManager (solc-0_8_28-25297f9aac4d7058526cfd8d1baf52b0e196e4ca)
 
 ## Node
 
-- HardhatNetwork/3.18.0/@nomicfoundation/edr/0.3.8; Hardhat 3.18.0 (node_modules); chain ID 31337; RPC http://127.0.0.1:8699 on the same machine
+- HardhatNetwork/3.18.0/@nomicfoundation/edr/0.3.8; Hardhat 3.18.0 (node_modules); chain ID 31337; RPC http://127.0.0.1:8745 on the same machine
 - automine on (hardhat_getAutomine), so each transaction is mined in its own block while eth_sendTransaction runs; no interval mining
 - block gas limit 60,000,000; 20 unlocked accounts; gas price and base fee play no part in the tables
 
@@ -32,4 +32,3 @@ Written by `python -m evaluation.measure --settings PATH` on 2026-09-28 23:28 UT
 - timing_results.csv has one row per operation, so its sample counts add up to each run's transactions. timing_summary.csv has the per-role and whole-run means over those same transactions; never add its rows to the others. In a run's whole-run row the receipt mean covers every transaction, the deployments included, while the event mean covers only the transactions that emit one.
 - Not in the tables: view calls (getUserInfo, checkAccess, getConsent, balanceOf) use eth_call, have no receipt and cost the caller no gas. A call that would revert (for example ConsentStillActive) fails at web3's gas estimate and is never mined, so it has no receipt either.
 - A blank cell or a missing row means not measured, never zero.
-
