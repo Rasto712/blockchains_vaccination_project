@@ -8,9 +8,11 @@ How the parts fit together, where data lives and how an access request works. Co
 flowchart TB
     actors["Deployer · Clinic · Guardian · School · Doctor<br/>(unlocked Hardhat demo accounts)"]
 
+    browser["Web UI page<br/>(browser, Viem)"]
+
     subgraph python["Python"]
         console["Console<br/>python -m app.main"]
-        webui["Web UI<br/>python -m ui.server"]
+        webui["Web UI server<br/>python -m ui.server"]
         core["disclosure.py · records.py · chain.py"]
     end
 
@@ -23,7 +25,9 @@ flowchart TB
     end
 
     actors --> console
-    actors --> webui
+    actors --> browser
+    browser -->|"school, doctor, setup, deploy, demo"| webui
+    browser -->|"Viem: register, attest, grant, revoke, views"| hardhat
     console --> core
     webui --> core
     core <--> files
@@ -31,6 +35,8 @@ flowchart TB
     manager -->|getUserInfo| registry
     manager -->|mintReward| token
 ```
+
+The web page sends register, attest, grant and revoke and reads the contract views itself with Viem; school and doctor requests go through Python, so the card and salts never reach the browser.
 
 ## Roles
 

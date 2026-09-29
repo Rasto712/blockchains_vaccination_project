@@ -5,17 +5,24 @@ page can also deploy them):
     .venv/bin/python -m ui.server [--settings PATH] [--port 8000]
 then open http://127.0.0.1:8000/ (or http://localhost:8000/). Ctrl+C stops it.
 
-Demo mode, not authentication: the page picks the acting role and the server signs with that role's unlocked
-Hardhat account, as the console does. The server listens on 127.0.0.1 only. It refuses a request whose Host
-is not 127.0.0.1:<port> or localhost:<port> (DNS rebinding), and a POST from another Origin or without a JSON
-body (cross-site forms). Every response forbids framing, inline code and caching. POST actions, the guided
-demo's steps and the demo controls (ui/demo.py, under /api/demo/) share one lock, so transactions and time
-moves never interleave; GET /api/state does not wait for it. The page only ever gets the
-fixed texts of ui/actions.py, never exception text or a traceback, and the server log shows only the type
-of a failure.
+Demo mode, not authentication: the page picks the acting role. Register, attest, grant and revoke go from the
+browser straight to the node with Viem (ui/static/chain.js), from that role's unlocked Hardhat account; the
+page gets the checked addresses and ABIs from GET /api/contracts and the two local hashes from
+GET /api/identity-hash and GET /api/record-commitment. School and doctor requests, setup, deploy and the
+guided demo run here, signed with the role's account as the console does, because disclosure needs the local
+card and salts, which never reach the browser. The server listens on 127.0.0.1 only. It refuses a request
+whose Host is not 127.0.0.1:<port> or localhost:<port> (DNS rebinding), and a POST from another Origin or
+without a JSON body (cross-site forms). Every response forbids framing, inline code and caching, and may
+connect only here and to the rpc_url origin. POST actions, the guided demo's steps and the demo controls
+(ui/demo.py, under /api/demo/) share one lock, so they never interleave with each other; GET requests do not
+wait for it. The page's Viem transactions cannot take it: the page runs one action at a time in every tab of
+its origin (a Web Lock), which keeps them out of a guided step started there, but not out of one started from
+the other host name or another process. The page only ever gets the fixed texts of ui/actions.py, never
+exception text or a traceback, and the server log shows only the type of a failure.
 """
 import argparse
 import json
+import re
 import socketserver
 import sys
 import threading
@@ -35,12 +42,18 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 STATIC_FILES = {
     "index.html": "text/html; charset=utf-8",
     "app.css": "text/css; charset=utf-8",
+    "chain.js": "text/javascript; charset=utf-8",
     "app.js": "text/javascript; charset=utf-8",
     "demo.js": "text/javascript; charset=utf-8",
 }
+# generated files, served the same way: the Viem bundle that npm run build:ui makes from static/src/viem.js
+VENDOR_FILES = {
+    "vendor/viem.js": "text/javascript; charset=utf-8",
+}
+SERVED_FILES = {**STATIC_FILES, **VENDOR_FILES}
 MAX_BODY_BYTES = 16 * 1024
+# the Content-Security-Policy is per server (content_security_policy), because it names the node's origin
 SECURITY_HEADERS = (
-    ("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"),
     ("X-Frame-Options", "DENY"),
     ("X-Content-Type-Options", "nosniff"),
     ("Referrer-Policy", "no-referrer"),
@@ -73,6 +86,43 @@ def _post_routes() -> dict[str, Any]:
     }
 
 
+def _get_routes() -> dict[str, Any]:
+    # path -> function(server, query) returning a result; none of them waits for the action lock
+    return {
+        "/api/contracts": lambda server, query: actions.perform(actions.contracts, server.settings, server.rpc_url),
+        "/api/identity-hash": lambda server, query: actions.perform(
+            actions.identity_hash, server.settings, query.get("role", [None])[0],
+        ),
+        "/api/record-commitment": lambda server, query: actions.perform(actions.record_commitment, server.settings),
+    }
+
+
+def rpc_origin(rpc_url: Any) -> str | None:
+    """scheme://host[:port] of the settings' rpc_url, for the CSP's connect-src, or None when it is not a plain
+    http(s) URL without user info whose host is an ASCII name or IPv4 address. Built from the parsed parts only,
+    so nothing else from the setting can reach the header.
+    """
+    if not isinstance(rpc_url, str):
+        return None
+    try:
+        url = urlsplit(rpc_url)
+        port = url.port
+    except ValueError:
+        return None
+    host = url.hostname or ""
+    if url.scheme not in ("http", "https") or url.username is not None or url.password is not None:
+        return None
+    if not re.fullmatch(r"[a-z0-9.-]+", host):
+        return None
+    return f"{url.scheme}://{host}" if port is None else f"{url.scheme}://{host}:{port}"
+
+
+def content_security_policy(origin: str | None) -> str:
+    """The page's policy: everything from this server only, plus connections to the node's origin for Viem."""
+    connect = f"'self' {origin}" if origin else "'self'"
+    return f"default-src 'self'; connect-src {connect}; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+
+
 def allowed_hosts(port: int) -> set[str]:
     """The Host values of this page: 127.0.0.1 and localhost with the port (browsers leave out port 80)."""
     hosts = {f"{HOST}:{port}", f"localhost:{port}"}
@@ -92,13 +142,18 @@ class UIServer(ThreadingHTTPServer):
         self.action_lock = threading.Lock()
         self.guided = demo.GuidedDemo()
         self.post_routes = _post_routes()
+        self.get_routes = _get_routes()
+        # the URL the page's Viem layer uses: the origin the CSP allows, and the setting's path
+        self.rpc_origin = rpc_origin(settings.get("rpc_url"))
+        self.rpc_url = self.rpc_origin + urlsplit(settings["rpc_url"]).path if self.rpc_origin else ""
+        self.csp = content_security_policy(self.rpc_origin)
         super().__init__((HOST, port), Handler)
         self.allowed_hosts = allowed_hosts(self.server_address[1])
         self.allowed_origins = {f"http://{host}" for host in self.allowed_hosts}
 
-    def state(self) -> dict[str, Any]:
+    def state(self, chain_views: bool = True) -> dict[str, Any]:
         """The page's snapshot, with the guided demo's progress."""
-        snapshot = actions.state(self.settings)
+        snapshot = actions.state(self.settings, chain_views)
         progress = self.guided.progress()
         # the guided demo ends when its contracts are gone (a node restart, a recompile) or replaced
         # (deploy_local --reset, the scripted demo), even by contracts at the same addresses
@@ -163,12 +218,21 @@ class Handler(BaseHTTPRequestHandler):
         url = urlsplit(self.path)
         if url.path in ("/", "/index.html"):
             self._send_static("index.html")
-        elif url.path.startswith("/static/") and url.path[len("/static/"):] in STATIC_FILES:
+        elif url.path.startswith("/static/") and url.path[len("/static/"):] in SERVED_FILES:
             self._send_static(url.path[len("/static/"):])
         elif url.path == "/favicon.ico":
             self._send(HTTPStatus.NO_CONTENT, b"", "text/plain")
         elif url.path == "/api/state":
-            self._send_json(HTTPStatus.OK, self.server.state())
+            # the page asks for chain_views=0: it reads the contract views itself with Viem
+            chain_views = parse_qs(url.query).get("chain_views") != ["0"]
+            self._send_json(HTTPStatus.OK, self.server.state(chain_views))
+        elif url.path in self.server.get_routes:
+            try:
+                payload = self.server.get_routes[url.path](self.server, parse_qs(url.query))
+            except actions.InvalidRequest as error:
+                self._send_json(HTTPStatus.BAD_REQUEST, actions.result("invalid", str(error)))
+                return
+            self._send_json(HTTPStatus.OK, payload)
         elif url.path == "/api/record":
             role = parse_qs(url.query).get("role", [""])[0]
             try:
@@ -222,7 +286,7 @@ class Handler(BaseHTTPRequestHandler):
         return body
 
     def _send_static(self, name: str) -> None:
-        self._send(HTTPStatus.OK, (STATIC_DIR / name).read_bytes(), STATIC_FILES[name])
+        self._send(HTTPStatus.OK, (STATIC_DIR / name).read_bytes(), SERVED_FILES[name])
 
     def _send_json(self, status: HTTPStatus, payload: dict[str, Any]) -> None:
         self._send(status, json.dumps(payload).encode("utf-8"), "application/json; charset=utf-8")
@@ -231,6 +295,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Content-Security-Policy", self.server.csp)
         for name, value in SECURITY_HEADERS:
             self.send_header(name, value)
         self.end_headers()
@@ -269,6 +334,10 @@ def main(argv: list[str] | None = None) -> None:
     except (OSError, OverflowError):
         _exit(f"cannot listen on {HOST}:{args.port}: the port is in use or invalid; pick another with --port")
     print(f"My Vaccination Card UI: http://{HOST}:{server.server_address[1]}/  (Ctrl+C stops it)", flush=True)
+    if server.rpc_origin is None:
+        # the URL itself is not printed: it could hold a user name or password
+        print("ui: rpc_url in the settings is not a plain http(s) URL, so the page cannot reach the node",
+              file=sys.stderr, flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

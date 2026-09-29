@@ -1,14 +1,17 @@
 /* AI assistance: parts of this file were written with Claude (Anthropic) and thoroughly reviewed. */
-/* The page: it polls /api/state, draws the top bar, the setup checklist, the acting role's view and the
-   audit timeline, and sends every action as a JSON POST. Everything that comes from the server is inserted
-   as text, never as HTML. Demo mode: the chosen role goes with each action, and the server signs with that
-   role's local Hardhat account. */
+/* The page: it polls /api/state and reads the contract views from the node with Viem (chain.js), draws the
+   top bar, the setup checklist, the acting role's view and the audit timeline, and runs one action at a time.
+   Register, attest, grant and revoke go to the node with Viem; school and doctor requests, setup, deploy and
+   the guided demo are JSON POSTs to the server. Everything that comes from the server or the node is inserted
+   as text, never as HTML. Demo mode: each action is sent from the chosen role's local Hardhat account. */
 'use strict';
 
 const POLL_MS = 2000;
 // above the server's 10 s RPC timeout, so a stalled node is reported as the node, not as this server
 const POLL_TIMEOUT_MS = 15000;
 const ROLE_KEY = 'vaccination-card-role';
+// one action at a time in every tab of this origin: the page's own transactions do not pass the server's lock
+const ACTION_LOCK = 'vaccination-card-action';
 const ROLES = ['deployer', 'clinic', 'guardian', 'school', 'doctor'];
 const ROLE_NOTES = {
   deployer: 'Deploys the three contracts. Never registers.',
@@ -43,6 +46,7 @@ const ui = {
   deploymentKey: null, // the contract addresses the outcomes on screen belong to
   highlight: { keys: [], txs: [] }, // the outcome cards and audit rows of the last guided step
   refocus: null, // the control that sent the running action, focused again once it is enabled
+  queue: Promise.resolve(), // the running action, where the browser has no Web Locks
 };
 
 /* ---------- helpers ---------- */
@@ -145,11 +149,14 @@ async function poll() {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), POLL_TIMEOUT_MS);
   try {
-    const response = await fetch('/api/state', { cache: 'no-store', signal: controller.signal });
+    // the server leaves out the contract views: chain.js reads them from the node with Viem
+    const response = await fetch('/api/state?chain_views=0', { cache: 'no-store', signal: controller.signal });
     const data = await response.json();
+    const usable = response.ok && data && data.roles;
+    const current = usable ? await addChainViews(data) : true;
     // a snapshot that started before the last action finished is older than what the page shows
-    if (seq === ui.actionSeq) {
-      if (response.ok && data && data.roles) {
+    if (seq === ui.actionSeq && current) {
+      if (usable) {
         forgetOtherDeployments(data);
         ui.snapshot = data;
         ui.serverMessage = '';
@@ -164,8 +171,11 @@ async function poll() {
   } finally {
     clearTimeout(timer);
   }
-  render();
-  schedulePoll();
+  try {
+    render();
+  } finally {
+    schedulePoll();
+  }
 }
 
 function forgetOtherDeployments(snapshot) {
@@ -186,7 +196,20 @@ function schedulePoll() {
   if (!document.hidden) ui.pollTimer = setTimeout(poll, POLL_MS);
 }
 
-async function act(key, path, body, confirmText) {
+function act(key, path, body, confirmText) {
+  // one POST to the server, which runs it under its action lock
+  return run(key, () => api('POST', path, body || {}), confirmText);
+}
+
+function oneAtATime(task) {
+  if (navigator.locks) return navigator.locks.request(ACTION_LOCK, task);
+  const running = ui.queue.then(task, task);
+  ui.queue = running.catch(() => null);
+  return running;
+}
+
+async function run(key, send, confirmText) {
+  // one action, sent by send() (a POST, or a Viem call from chain.js), with its pending state and outcome
   if (ui.pending[key]) return null;
   if (confirmText && !window.confirm(confirmText)) return null;
   // the button is disabled while its request runs, which drops keyboard focus; show() gives it back afterwards
@@ -198,7 +221,7 @@ async function act(key, path, body, confirmText) {
   render();
   let outcome;
   try {
-    outcome = await api('POST', path, body || {});
+    outcome = await oneAtATime(send);
   } catch (error) {
     outcome = { status: 'failed', message: 'the UI server did not answer', reason: '', tx: '', fields: {}, details: {} };
   }
@@ -344,6 +367,7 @@ function resultCard(result, access, highlighted) {
       ['original still matches on-chain', yesNo(details.original_matches)],
     ]) : null,
     details.note ? el('p', { class: 'muted', text: details.note }) : null,
+    details.via === 'viem' ? el('p', { class: 'muted', text: 'sent from this browser with Viem' }) : null,
     details.contracts ? rows(Object.entries(details.contracts).map(([name, address]) => [name, hash(address)])) : null);
 }
 
@@ -387,7 +411,7 @@ function renderSetup() {
       detail: deployment.deployed ? s.registering.map((label) => `${label}: ${registrations[label] && registrations[label].registered ? 'yes' : 'no'}`).join(' · ') : '',
       action: s.registering.map((label) => [
         deployment.deployed && !(registrations[label] && registrations[label].registered)
-          ? button(`Register as ${label}`, `register:${label}`, () => act(`register:${label}`, '/api/register', { role: label }))
+          ? button(`Register as ${label}`, `register:${label}`, () => run(`register:${label}`, () => viemRegister(label)))
           : null,
         outcomeCard(`register:${label}`)]),
     },
@@ -395,7 +419,7 @@ function renderSetup() {
       done: Boolean(record && record.attested), title: 'record attested by the clinic',
       detail: attestedText(s),
       action: [deployment.deployed && !(record && record.attested) ? button('Attest as clinic', 'attest:clinic',
-        () => act('attest:clinic', '/api/attest', { role: 'clinic' })) : null, outcomeCard('attest:clinic')],
+        () => run('attest:clinic', () => viemAttest('clinic'))) : null, outcomeCard('attest:clinic')],
     },
   ];
   for (const item of items) {
@@ -449,12 +473,13 @@ function registrationCard(s, label) {
       registration && registration.registered ? ['matches the local hash', yesNo(registration.matches)] : null,
     ]),
     el('p', { class: 'muted', text: 'Only the salted hash goes on-chain; the identity and its salt stay in local files.' }),
-    button(`Register as ${label}`, `register:${label}`, () => act(`register:${label}`, '/api/register', { role: label })),
+    button(`Register as ${label}`, `register:${label}`, () => run(`register:${label}`, () => viemRegister(label))),
     outcomeCard(`register:${label}`));
 }
 
 function attestCard(s) {
   const record = s.record;
+  const role = ui.role;
   return card('Attest the guardian\'s record',
     el('p', {}, `Sends registerVaccination from this account (${ui.role}). Only the trusted clinic may attest; `
       + 'any other account is rejected with NotTrustedClinic.'),
@@ -463,7 +488,7 @@ function attestCard(s) {
       ['attested on-chain', record ? yesNo(record.attested) : el('span', { class: 'muted', text: '—' })],
     ]),
     // one outcome per role, so one role's result never shows up in another role's card
-    button(`Attest as ${ui.role}`, `attest:${ui.role}`, () => act(`attest:${ui.role}`, '/api/attest', { role: ui.role })),
+    button(`Attest as ${role}`, `attest:${role}`, () => run(`attest:${role}`, () => viemAttest(role))),
     outcomeCard(`attest:${ui.role}`));
 }
 
@@ -559,11 +584,11 @@ function consentCell(requester, scope, cell, busy) {
       input, el('span', { class: 'muted', text: 'days' }),
       el('button', {
         type: 'button', class: 'btn', disabled: busy, 'data-focus': `grant:${key}`,
-        onclick: () => act('consent', '/api/grant', { role: 'guardian', requester, scope, days: Number(input.value) }),
+        onclick: () => run('consent', () => viemGrant('guardian', requester, scope, input.value)),
       }, 'Grant'),
       el('button', {
         type: 'button', class: 'btn secondary', disabled: busy, 'data-focus': `revoke:${key}`,
-        onclick: () => act('consent', '/api/revoke', { role: 'guardian', requester, scope }),
+        onclick: () => run('consent', () => viemRevoke('guardian', requester, scope)),
       }, 'Revoke')),
   ];
 }
@@ -601,7 +626,7 @@ function renderAudit() {
   const s = ui.snapshot;
   const head = el('div', { class: 'audit-head' }, el('h2', { text: 'Audit timeline' }),
     s && s.deployment.deployed ? badge(`${s.audit.length}`, 'muted') : null);
-  const note = el('p', { class: 'muted', text: 'Every AccessAttempt on-chain, newest first: allowed and denied alike, never deleted.' });
+  const note = el('p', { class: 'muted', text: 'Every AccessAttempt on-chain, newest first: allowed and denied alike, never deleted. Read from the node with Viem.' });
   if (!s || !s.deployment.deployed) return [head, note, el('p', { class: 'muted', text: 'no deployment to read' })];
   if (!s.audit.length) return [head, note, el('p', { class: 'muted', text: 'no access attempts yet' })];
   const marked = ui.highlight.txs;
@@ -621,7 +646,7 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden) clearTimeout(ui.pollTimer);
   else poll();
 });
-// deferred scripts (this one, then demo.js) have all run before DOMContentLoaded
+// deferred scripts (vendor/viem.js, chain.js, this one, then demo.js) have all run before DOMContentLoaded
 document.addEventListener('DOMContentLoaded', () => {
   render();
   poll();

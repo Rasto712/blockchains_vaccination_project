@@ -6,6 +6,9 @@ Everything goes through the existing modules, so the privacy rules and the error
 chain calls through "from app import chain" (tests swap in tests/fake_chain.py there), school and doctor
 requests through app.disclosure, local files through app.records, the deploy through scripts.deploy_local
 and node time through integration.demo_workflow. Nothing here hashes, discloses or calls web3 itself.
+The page itself sends register, attest, grant and revoke and reads the contract views with Viem
+(ui/static/chain.js); contracts, identity_hash and record_commitment give it the checked addresses and ABIs
+and the two hashes that need local files. The other actions here serve the guided demo (ui/demo.py).
 
 Every action returns a result {status, message, reason, tx, fields, details}. For a school or doctor
 request status is disclosure's outcome (allowed, denied, unavailable or pending); for the other actions it
@@ -90,10 +93,12 @@ def log_failure(error: BaseException) -> None:
     print(f"ui: failed: {type(error).__name__}", file=sys.stderr, flush=True)
 
 
-def state(settings: dict[str, Any]) -> dict[str, Any]:
+def state(settings: dict[str, Any], chain_views: bool = True) -> dict[str, Any]:
     """Everything the page shows, read fresh: local files first (these work without a node), then one
     connection for the chain part. The first chain error stops the chain part, and its message stands
     for all of it. Only public values and hashes: never the card, a salt or a path.
+    chain_views=False still checks the deployment but leaves out registrations, record, consents, rewards
+    and audit: the page reads those itself with Viem.
     """
     snapshot: dict[str, Any] = {
         "roles": list(settings["actor_account_indices"]),
@@ -132,12 +137,52 @@ def state(settings: dict[str, Any]) -> dict[str, Any]:
             deployed=True, contracts={name: contract.address for name, contract in contracts.items()},
             deploy_block=_recorded_deploy_block(settings),
         )
-        snapshot.update(_contract_state(contracts, snapshot["accounts"], snapshot["local"], now))
+        if chain_views:
+            snapshot.update(_contract_state(contracts, snapshot["accounts"], snapshot["local"], now))
     except Exception as error:
         # the node stopped answering during the snapshot (or, for a bug, "failed: <TypeName>")
         node.update(reachable=False, message=error_result(error)["message"])
         deployment.update(deployed=False, contracts={}, deploy_block="")
     return snapshot
+
+
+def contracts(settings: dict[str, Any], rpc_url: str) -> dict[str, Any]:
+    """What the page's Viem layer needs: the three contracts' addresses and ABIs, the role accounts and the
+    scope and reason codes. Served only once main.contract (chain.load_contract) has checked each contract
+    against this node, so a missing or stale deployment answers NO_DEPLOYMENT_MESSAGE as everywhere else.
+    rpc_url is the server's checked RPC URL, the one the page's CSP allows. Public values only.
+    """
+    client = chain.connect(settings)
+    accounts = {label: chain.select_account(client, label, settings) for label in settings["actor_account_indices"]}
+    loaded = {name: main.contract(client, name, settings) for name in chain.CONTRACT_NAMES}
+    return result(
+        "ok", "contracts checked against this node",
+        # connect has checked the chain ID against expected_chain_id
+        chain_id=settings["expected_chain_id"], rpc_url=rpc_url, deploy_block=_recorded_deploy_block(settings),
+        contracts={name: {"address": contract.address, "abi": contract.abi} for name, contract in loaded.items()},
+        accounts=accounts,
+        scopes={scope.name: int(scope) for scope in SCOPES},
+        reasons={reason.name: int(reason) for reason in Reason},
+    )
+
+
+def identity_hash(settings: dict[str, Any], role: Any) -> dict[str, Any]:
+    """The salted identity hash of a registering role, which the page sends with registerUser. Only the
+    hash: the identity file and its salt stay in local files.
+    """
+    role = _role(settings, role)
+    if role not in records.REGISTERING_LABELS:
+        raise InvalidRequest("only guardian, school and doctor register")
+    value = records.prepare_identity(*records.identity_paths(settings, role))
+    return result("ok", f"identity hash of {role}", identity_hash=_hex(value))
+
+
+def record_commitment(settings: dict[str, Any]) -> dict[str, Any]:
+    """The commitment of the guardian's local record, which the page sends with registerVaccination. Only
+    the commitment: the card and its salt stay on this computer.
+    """
+    commitment = main.record_snapshot(settings)["commitment"]
+    return result("ok", "commitment of the guardian's local record", commitment=_hex(commitment))
 
 
 def setup(settings: dict[str, Any]) -> dict[str, Any]:

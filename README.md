@@ -63,6 +63,7 @@ Run every command from the project root; start Python with `-m` as shown.
    ```
 
    Open http://127.0.0.1:8000/, pick a role, or press **Guided demo** to play the scripted demo one click per step.
+   The page calls the contracts from the browser with Viem: register, attest, grant, revoke, and the registrations, consents, rewards and audit it shows. School check, doctor view, setup, deploy and the guided demo run in the Python server, because disclosure needs the local card and salts, which never reach the browser.
 
 ## Documentation
 
