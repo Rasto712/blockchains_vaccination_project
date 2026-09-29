@@ -1,7 +1,5 @@
 # Architecture
 
-AI assistance: parts of this project were written with Claude (Anthropic) and thoroughly reviewed.
-
 A Python console and scripts use exactly three Solidity contracts on a local Hardhat node (chain ID 31337). Child data stays in local JSON; the chain holds only salted commitments and consent, audit and reward metadata.
 
 ```mermaid

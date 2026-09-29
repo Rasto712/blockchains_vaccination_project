@@ -1,7 +1,5 @@
 # Contract API reference
 
-AI assistance: parts of this project were written with Claude (Anthropic) and thoroughly reviewed.
-
 The three contracts in contracts/ (Solidity 0.8.28). NatSpec comments in each .sol file explain parameters, return values and validation rules. The 38 Solidity tests in test/ pin the behaviour below: SOL-IR-01..09 (IdentityRegistry), SOL-CM-01..22 (ConsentManager) and SOL-RT-01..07 (ConsentRewardToken). [TESTING.md](TESTING.md) says how to run them.
 
 ## Functions

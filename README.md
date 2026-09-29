@@ -1,7 +1,5 @@
 # My Vaccination Card
 
-AI assistance: parts of this project were written with Claude (Anthropic) and thoroughly reviewed.
-
 A guardian keeps a child's vaccination card as a local JSON file and decides who may check it. Three Solidity contracts run on a local Hardhat node:
 
 - IdentityRegistry stores each registered account's salted identity hash and one vaccination-record commitment per guardian, attested only by a fixed trusted clinic.

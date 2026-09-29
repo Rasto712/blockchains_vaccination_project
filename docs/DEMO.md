@@ -1,7 +1,5 @@
 # Demo walkthrough
 
-AI assistance: parts of this project were written with Claude (Anthropic) and thoroughly reviewed.
-
 `python -m integration.demo_workflow` runs the whole story on a local Hardhat node, with real transactions and the synthetic record, and checks every outcome. This page follows its transcript in the order it runs. The menu can do the same story by hand, except tamper and exact expiry (see the last section).
 
 ## Running it
