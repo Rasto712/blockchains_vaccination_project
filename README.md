@@ -102,6 +102,3 @@ runtime-data/  made at run time, git ignored: local files, salts, deployment.jso
 | `local node not reachable or wrong chain` | Start `npm run node` and keep it running. `rpc_url` in config/settings.json must match its address. |
 | `web3 not installed: ...`, or a `TypeError` at start | You ran a Python other than the venv's, or one older than 3.10. Activate the venv, or recreate it with Python 3.10 or newer. |
 
-## Windows
-
-Not tested on Windows. In PowerShell the npm commands are the same. For Python, create the venv with `py -3 -m venv .venv`, run Python as `.venv\Scripts\python` (for example `.venv\Scripts\python -m app.main`), and copy the settings with `copy config\settings.example.json config\settings.json`.
