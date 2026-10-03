@@ -9,6 +9,7 @@ on a node.
 import contextlib
 import csv
 import io
+import itertools
 import json
 import tempfile
 import unittest
@@ -180,7 +181,10 @@ class DeploymentCostTests(unittest.TestCase):
 
 class MeasureTransactionTests(unittest.TestCase):
     def test_success_with_and_without_an_event(self):
-        measured = measure.measure_transaction(lambda: receipt(100), lambda r: {"reason": 0})
+        # a clock that ticks 1 ms per reading: time.monotonic only advances every ~16 ms on Windows,
+        # so an instant fake transaction would measure 0 seconds there
+        with mock.patch.object(measure.time, "monotonic", side_effect=itertools.count(100.0, 0.001)):
+            measured = measure.measure_transaction(lambda: receipt(100), lambda r: {"reason": 0})
         self.assertEqual((measured["status"], measured["gas_used"], measured["event"]), ("ok", 100, {"reason": 0}))
         self.assertGreaterEqual(measured["event_seconds"], measured["receipt_seconds"])
         self.assertGreater(measured["receipt_seconds"], 0)
