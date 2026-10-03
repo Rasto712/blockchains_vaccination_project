@@ -9,3 +9,6 @@ docs/REPORT_OUTLINE.md export-ignore
 docs/SCAFFOLD_VALIDATION.md export-ignore
 docs/UI_HANDOFF.md export-ignore
 docs/developer_plan.pdf export-ignore
+
+.gitattributes export-ignore
+.gitignore export-ignore
