@@ -69,7 +69,7 @@ Run every command from the project root; start Python with `-m` as shown.
 
    ```bash
    npm test                               # 38 Solidity tests (test/*.t.sol)
-   python -m unittest discover -s tests   # 420 Python unit tests
+   python -m unittest discover -s tests   # 417 Python unit tests
    ```
 
    [TESTING.md](docs/TESTING.md) gives the recorded results and the commands that regenerate them; the live checks, gas and timing need the node.

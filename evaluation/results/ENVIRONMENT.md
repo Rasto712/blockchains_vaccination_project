@@ -5,7 +5,7 @@ Local demo measurements: one machine, one local Hardhat node with automine, tran
 ## Compiler
 
 - solc 0.8.28, optimiser on, 200 runs (hardhat.config.ts).
-- solc 0.8.28+commit.7893614a, optimiser on, 200 runs, EVM cancun: IdentityRegistry (solc-0_8_28-25297f9aac4d7058526cfd8d1baf52b0e196e4ca), ConsentRewardToken (solc-0_8_28-df718c32f49d73ab56ebbd62abe428136371c267), ConsentManager (solc-0_8_28-25297f9aac4d7058526cfd8d1baf52b0e196e4ca)
+- solc 0.8.28 (build 7893614a), optimiser on, 200 runs, EVM cancun: IdentityRegistry (solc-0_8_28-25297f9aac4d7058526cfd8d1baf52b0e196e4ca), ConsentRewardToken (solc-0_8_28-df718c32f49d73ab56ebbd62abe428136371c267), ConsentManager (solc-0_8_28-25297f9aac4d7058526cfd8d1baf52b0e196e4ca)
 
 ## Node
 

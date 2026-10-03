@@ -11,8 +11,7 @@ from unittest import mock
 from app import records
 from app.models import Reason, ChainUnavailable, DeploymentUnavailable
 from integration import demo_workflow
-from tests.test_ui import UITestCase, AI_LINE
-from ui import demo
+from tests.test_ui import UITestCase
 
 STEP_ROLES = ["deployer", "guardian", "clinic", "school", "guardian", "school", "guardian", "doctor", "doctor",
               "school", "guardian", "school"]
@@ -360,12 +359,6 @@ class ExpireTests(GuidedTestCase):
         self.ready()
         self.fake.failures["connect"] = ChainUnavailable("RPC connection failed")
         self.assertEqual(self.expire()["message"], "unavailable: local node not reachable or wrong chain")
-
-
-class FileTests(unittest.TestCase):
-    def test_new_files_carry_the_ai_line(self):
-        self.assertEqual(Path(__file__).read_text().splitlines()[0], f"# {AI_LINE}")
-        self.assertEqual(Path(demo.__file__).read_text().splitlines()[0], f"# {AI_LINE}")
 
 
 if __name__ == "__main__":

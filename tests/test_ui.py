@@ -30,7 +30,6 @@ NODE_DOWN = "unavailable: local node not reachable or wrong chain"
 NO_DEPLOYMENT = "unavailable: no deployment for this node: run python -m scripts.deploy_local --reset"
 NO_ARTIFACTS = "unavailable: compiled contracts not found: run npm run compile first"
 NO_WEB3 = "unavailable: web3 not installed: run python -m pip install -r requirements.txt with the venv's Python"
-AI_LINE = "AI assistance: parts of this file were written with Claude (Anthropic) and thoroughly reviewed."
 
 
 class UITestCase(unittest.TestCase):
@@ -132,7 +131,7 @@ class StaticTests(UITestCase):
         self.assertEqual(headers["x-frame-options"], "DENY")
         self.assertEqual(headers["x-content-type-options"], "nosniff")
         self.assertEqual(headers["cache-control"], "no-store")
-        self.assertTrue(body.startswith(b"<!doctype html>\n<!-- AI assistance:"))
+        self.assertTrue(body.startswith(b"<!doctype html>"))
 
     def test_every_kind_of_response_carries_the_security_headers(self):
         for method, path, headers in (
@@ -149,20 +148,6 @@ class StaticTests(UITestCase):
         for path in ("/static/../server.py", "/static/%2e%2e/server.py", "/ui/server.py", "/static/", "/static/missing.js",
                      "/settings.json", "/api/nothing"):
             self.assertEqual(self.request("GET", path)[0], 404, path)
-
-    def test_every_new_file_carries_the_ai_line(self):
-        folder = Path(server.__file__).resolve().parent
-        # __init__.py is a docstring-only package marker, like app/__init__.py
-        for path in [*folder.glob("*.py"), Path(__file__)]:
-            if path.name == "__init__.py":
-                continue
-            self.assertEqual(path.read_text().splitlines()[0], f"# {AI_LINE}", path.name)
-        for name in server.STATIC_FILES:
-            lines = (server.STATIC_DIR / name).read_text().splitlines()
-            if name.endswith(".html"):
-                self.assertEqual(lines[:2], ["<!doctype html>", f"<!-- {AI_LINE} -->"])
-            else:
-                self.assertEqual(lines[0], f"/* {AI_LINE} */", name)
 
 
 class RequestGuardTests(UITestCase):

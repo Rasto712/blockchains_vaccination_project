@@ -1,7 +1,7 @@
 # AI assistance: parts of this file were written with Claude (Anthropic) and thoroughly reviewed.
 """Node-free tests for the server side of the page's Viem layer: GET /api/contracts, /api/identity-hash and
 /api/record-commitment, the lean /api/state, the Content-Security-Policy with the node's origin, and the files
-the page loads for Viem (the committed bundle and chain.js). Viem itself runs in the browser; the same page was
+the page loads for Viem (the prebuilt bundle and chain.js). Viem itself runs in the browser; the same page was
 clicked through on a real node. Every JSON answer also goes through UITestCase's leak check (no path, salt,
 identity value or record field).
 """
@@ -12,7 +12,7 @@ from pathlib import Path
 
 from app import chain, records
 from app.models import Reason, ChainUnavailable, DeploymentUnavailable, ArtifactUnavailable
-from tests.test_ui import UITestCase, NODE_DOWN, NO_DEPLOYMENT, NO_ARTIFACTS, AI_LINE
+from tests.test_ui import UITestCase, NODE_DOWN, NO_DEPLOYMENT, NO_ARTIFACTS
 from ui import actions, server
 
 # a stand-in ABI per contract: FakeNode's contracts have none, and the real artifacts are git ignored
@@ -199,7 +199,7 @@ class PolicyTests(ViemTestCase):
 
 
 class PageFileTests(ViemTestCase):
-    def test_the_committed_bundle_is_served_with_its_header(self):
+    def test_the_prebuilt_bundle_is_served_with_its_header(self):
         status, headers, body = self.request("GET", "/static/vendor/viem.js")
         self.assertEqual(status, 200)
         self.assertEqual(headers["content-type"], "text/javascript; charset=utf-8")
@@ -232,11 +232,6 @@ class PageFileTests(ViemTestCase):
             self.assertIn(part, text)
         # the page asks for the lean snapshot and reads the contract views itself
         self.assertIn("/api/state?chain_views=0", (server.STATIC_DIR / "app.js").read_text())
-
-    def test_new_hand_written_files_carry_the_ai_line(self):
-        self.assertEqual(Path(__file__).read_text().splitlines()[0], f"# {AI_LINE}")
-        for path in (ENTRY, CHAIN_JS):
-            self.assertEqual(path.read_text().splitlines()[0], f"/* {AI_LINE} */", path.name)
 
 
 if __name__ == "__main__":

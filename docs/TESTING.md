@@ -10,12 +10,12 @@ The recorded results are already in evaluation/results/; rerunning a command ove
 |---|---|---|---|
 | Solidity tests | `npx hardhat test solidity` | - | 38 passing |
 | Solidity tests, saved | `python -m evaluation.export_solidity_results` | solidity_test_results.csv, solidity_test_run.log | 38 rows, all pass |
-| Python unit tests | `python -m unittest discover -s tests` | - | 420 tests, OK |
+| Python unit tests | `python -m unittest discover -s tests` | - | 417 tests, OK |
 | Scripted demo | `python -m integration.demo_workflow` | - | `demo passed` ([DEMO.md](DEMO.md)) |
 | Python checks, saved | `python -m evaluation.export_python_results` | test_results.csv | 13 rows, all pass |
 | Gas and timing | `python -m evaluation.measure` | gas_results.csv, timing_results.csv, timing_summary.csv, ENVIRONMENT.md | 17, 61 and 116 transactions for 1, 5 and 10 requesters; 0 failed |
 
-Each test CSV row gives the requirement, expected and actual result, command and commit. ENVIRONMENT.md records the compiler, node and machine for gas and timing.
+Each test CSV row gives the requirement, expected and actual result, command and time. ENVIRONMENT.md records the compiler, node and machine for gas and timing.
 
 ## Test IDs
 
@@ -49,7 +49,7 @@ Average gasUsed from the receipts (solc 0.8.28, optimizer on, 200 runs). Full ta
 | revokeConsent | 29,713 |
 | requestAccess, allowed or denied | 38,821 to 41,498 |
 
-Mean send-to-receipt time: 4.6 to 6.0 ms per transaction (timing_summary.csv).
+Mean send-to-receipt time: 7.0 to 8.7 ms per transaction (whole-run means in timing_summary.csv).
 
 ## Caveats
 
