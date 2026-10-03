@@ -65,6 +65,15 @@ Run every command from the project root; start Python with `-m` as shown.
    Open http://127.0.0.1:8000/, pick a role, or press **Guided demo** to play the scripted demo one click per step.
    The page calls the contracts from the browser with Viem: register, attest, grant, revoke, and the registrations, consents, rewards and audit it shows. School check, doctor view, setup, deploy and the guided demo run in the Python server, because disclosure needs the local card and salts, which never reach the browser.
 
+6. Run the tests, with the venv active. Neither needs the node:
+
+   ```bash
+   npm test                               # 38 Solidity tests (test/*.t.sol)
+   python -m unittest discover -s tests   # 420 Python unit tests
+   ```
+
+   [TESTING.md](docs/TESTING.md) gives the recorded results and the commands that regenerate them; the live checks, gas and timing need the node.
+
 ## Documentation
 
 Reading order:
@@ -101,4 +110,3 @@ runtime-data/  made at run time, git ignored: local files, salts, deployment.jso
 | `no deployment for this node: run python -m scripts.deploy_local --reset` | The node keeps everything in memory, so a restart wipes the contracts. Run that command, then register and attest again. |
 | `local node not reachable or wrong chain` | Start `npm run node` and keep it running. `rpc_url` in config/settings.json must match its address. |
 | `web3 not installed: ...`, or a `TypeError` at start | You ran a Python other than the venv's, or one older than 3.10. Activate the venv, or recreate it with Python 3.10 or newer. |
-
