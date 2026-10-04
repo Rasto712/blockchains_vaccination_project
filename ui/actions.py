@@ -2,21 +2,12 @@
 """What the web UI does, without any HTTP: one state snapshot for the page and one function per action.
 ui/server.py turns them into JSON endpoints.
 
-Everything goes through the existing modules, so the privacy rules and the error mapping stay in one place:
-chain calls through "from app import chain" (tests swap in tests/fake_chain.py there), school and doctor
-requests through app.disclosure, local files through app.records, the deploy through scripts.deploy_local
-and node time through integration.demo_workflow. Nothing here hashes, discloses or calls web3 itself.
-The page itself sends register, attest, grant and revoke and reads the contract views with Viem
-(ui/static/chain.js); contracts, identity_hash and record_commitment give it the checked addresses and ABIs
-and the two hashes that need local files. The other actions here serve the guided demo (ui/demo.py).
+Everything goes through the existing modules (app.chain, app.disclosure, app.records, scripts.deploy_local),
+so privacy rules and error handling stay in one place. Nothing here hashes, discloses or calls web3 itself.
+The page sends register, attest, grant and revoke itself with Viem (ui/static/chain.js).
 
-Every action returns a result {status, message, reason, tx, fields, details}. For a school or doctor
-request status is disclosure's outcome (allowed, denied, unavailable or pending); for the other actions it
-is ok, rejected, unavailable, pending or failed. Messages are the console's texts (app/main.py). Exception
-text is never passed on: only a Solidity error name, a fixed message, a RecordError message (these never
-hold data, salts or paths) or, for a bug, "failed: <TypeName>". reason is set only for allowed and denied,
-because the event reason of an unavailable answer (HASH_MISMATCH after Python itself sent the zero hash)
-is not a clinical answer. fields is non-empty only for an allowed school or doctor answer.
+Every action returns a result {status, message, reason, tx, fields, details}. Exception text is never passed
+on, only a Solidity error name, a fixed message, or "failed: <TypeName>" for a bug.
 """
 import json
 import sys
@@ -31,7 +22,7 @@ from app.models import (
 from integration import demo_workflow
 from scripts import deploy_local
 
-# the console's text for a node that is down or on another chain (app/main.py dispatch_action)
+# same text the console shows when the node is down or on another chain
 NODE_UNAVAILABLE_MESSAGE = "unavailable: local node not reachable or wrong chain"
 REQUESTERS = ("school", "doctor")
 SCOPES = (Scope.MEASLES_STATUS, Scope.VACCINATION_SCHEDULE)
@@ -39,24 +30,22 @@ MAX_DAYS = 365
 
 
 class InvalidRequest(Exception):
-    """The request itself is wrong (unknown role, requester or scope, or a bad day count). Nothing was sent;
-    the message is fixed text and safe to show.
-    """
+    """The request is wrong (unknown role, requester or scope, or bad day count). Nothing was sent."""
 
 
 class Forbidden(Exception):
-    """The acting role may not see this. Demo mode: a guard for the page, not authentication."""
+    """This role is not allowed to see this. Demo mode, so this is not real authentication."""
 
 
 def result(
     status: str, message: str, reason: str = "", tx: str = "", fields: dict[str, Any] | None = None, **details: Any,
 ) -> dict[str, Any]:
-    """One action's answer, in the shape the page renders."""
+    """One action's answer, in the shape the page shows."""
     return {"status": status, "message": message, "reason": reason, "tx": tx, "fields": fields or {}, "details": details}
 
 
 def error_result(error: BaseException) -> dict[str, Any]:
-    """The result for an exception, with the console's texts. A bug shows only its type, and only the type is logged."""
+    """Turn an exception into a result using the console's texts. For a bug only the type is shown."""
     if isinstance(error, TransactionRejected):
         return result("rejected", f"rejected: {error.args[0] if error.args else 'reverted'}")
     if isinstance(error, TransactionPending):
@@ -70,7 +59,7 @@ def error_result(error: BaseException) -> dict[str, Any]:
     if isinstance(error, ChainUnavailable):
         return result("unavailable", NODE_UNAVAILABLE_MESSAGE)
     if isinstance(error, records.RecordError):
-        # these messages never hold data, salts or paths
+        # these messages never contain data, salts or paths
         return result("unavailable", f"unavailable: {error}")
     if isinstance(error, deploy_local.DeployError):
         return result("unavailable", f"unavailable: {_deploy_message(error)}")
@@ -79,7 +68,7 @@ def error_result(error: BaseException) -> dict[str, Any]:
 
 
 def perform(action: Any, *arguments: Any) -> dict[str, Any]:
-    """Run one action and map any error to its result. InvalidRequest and Forbidden go up to the server."""
+    """Run one action and turn any error into a result. InvalidRequest and Forbidden go up to the server."""
     try:
         return action(*arguments)
     except (InvalidRequest, Forbidden):
@@ -89,16 +78,14 @@ def perform(action: Any, *arguments: Any) -> dict[str, Any]:
 
 
 def log_failure(error: BaseException) -> None:
-    # the server log gets the type only: exception text can hold local data
+    # log only the type, the text could contain local data
     print(f"ui: failed: {type(error).__name__}", file=sys.stderr, flush=True)
 
 
 def state(settings: dict[str, Any], chain_views: bool = True) -> dict[str, Any]:
-    """Everything the page shows, read fresh: local files first (these work without a node), then one
-    connection for the chain part. The first chain error stops the chain part, and its message stands
-    for all of it. Only public values and hashes: never the card, a salt or a path.
-    chain_views=False still checks the deployment but leaves out registrations, record, consents, rewards
-    and audit: the page reads those itself with Viem.
+    """Everything the page shows, read fresh. Local files first (they work without a node), then the chain.
+    The first chain error stops the chain part. Only public values: never the card, a salt or a path.
+    chain_views=False skips the contract views, because the page reads those itself with Viem.
     """
     snapshot: dict[str, Any] = {
         "roles": list(settings["actor_account_indices"]),
@@ -123,14 +110,14 @@ def state(settings: dict[str, Any], chain_views: bool = True) -> dict[str, Any]:
         node["message"] = error_result(error)["message"]
         return snapshot
     try:
-        # connect has checked the chain ID against expected_chain_id
+        # connect already checked the chain ID
         now = demo_workflow._block_timestamp(client, "latest")
         node.update(reachable=True, chain_id=settings["expected_chain_id"], time=now, time_text=_utc(now))
         snapshot["accounts"] = {label: chain.select_account(client, label, settings) for label in snapshot["roles"]}
         try:
             contracts = {name: main.contract(client, name, settings) for name in chain.CONTRACT_NAMES}
         except DeploymentUnavailable as error:
-            # ArtifactUnavailable included: the node answers, but nothing usable is deployed on it
+            # includes the case where the node answers but nothing usable is deployed
             deployment["message"] = error_result(error)["message"]
             return snapshot
         deployment.update(
@@ -140,24 +127,22 @@ def state(settings: dict[str, Any], chain_views: bool = True) -> dict[str, Any]:
         if chain_views:
             snapshot.update(_contract_state(contracts, snapshot["accounts"], snapshot["local"], now))
     except Exception as error:
-        # the node stopped answering during the snapshot (or, for a bug, "failed: <TypeName>")
+        # the node stopped answering during the snapshot
         node.update(reachable=False, message=error_result(error)["message"])
         deployment.update(deployed=False, contracts={}, deploy_block="")
     return snapshot
 
 
 def contracts(settings: dict[str, Any], rpc_url: str) -> dict[str, Any]:
-    """What the page's Viem layer needs: the three contracts' addresses and ABIs, the role accounts and the
-    scope and reason codes. Served only once main.contract (chain.load_contract) has checked each contract
-    against this node, so a missing or stale deployment answers NO_DEPLOYMENT_MESSAGE as everywhere else.
-    rpc_url is the server's checked RPC URL, the one the page's CSP allows. Public values only.
+    """What the page's Viem code needs: contract addresses and ABIs, role accounts, scope and reason codes.
+    Only served after the deployment was checked against the node.
     """
     client = chain.connect(settings)
     accounts = {label: chain.select_account(client, label, settings) for label in settings["actor_account_indices"]}
     loaded = {name: main.contract(client, name, settings) for name in chain.CONTRACT_NAMES}
     return result(
         "ok", "contracts checked against this node",
-        # connect has checked the chain ID against expected_chain_id
+        # connect already checked the chain ID
         chain_id=settings["expected_chain_id"], rpc_url=rpc_url, deploy_block=_recorded_deploy_block(settings),
         contracts={name: {"address": contract.address, "abi": contract.abi} for name, contract in loaded.items()},
         accounts=accounts,
@@ -167,9 +152,7 @@ def contracts(settings: dict[str, Any], rpc_url: str) -> dict[str, Any]:
 
 
 def identity_hash(settings: dict[str, Any], role: Any) -> dict[str, Any]:
-    """The salted identity hash of a registering role, which the page sends with registerUser. Only the
-    hash: the identity file and its salt stay in local files.
-    """
+    """The salted identity hash of a role, which the page sends with registerUser. Only the hash."""
     role = _role(settings, role)
     if role not in records.REGISTERING_LABELS:
         raise InvalidRequest("only guardian, school and doctor register")
@@ -178,15 +161,13 @@ def identity_hash(settings: dict[str, Any], role: Any) -> dict[str, Any]:
 
 
 def record_commitment(settings: dict[str, Any]) -> dict[str, Any]:
-    """The commitment of the guardian's local record, which the page sends with registerVaccination. Only
-    the commitment: the card and its salt stay on this computer.
-    """
+    """The commitment of the guardian's local record. Only the commitment, not the card."""
     commitment = main.record_snapshot(settings)["commitment"]
     return result("ok", "commitment of the guardian's local record", commitment=_hex(commitment))
 
 
 def setup(settings: dict[str, Any]) -> dict[str, Any]:
-    """Create the missing local files and salts (records.setup_runtime). No paths are shown."""
+    """Create the missing local files and salts. No paths are shown."""
     created = records.setup_runtime(settings)
     if not created:
         return result("ok", "setup: every local file already exists, nothing changed")
@@ -194,9 +175,7 @@ def setup(settings: dict[str, Any]) -> dict[str, Any]:
 
 
 def deploy(settings_path: Path) -> dict[str, Any]:
-    """Deploy fresh contracts as python -m scripts.deploy_local --reset does. Everything registered, granted or
-    rewarded on the old contracts is left behind; local files and salts are kept.
-    """
+    """Deploy fresh contracts like deploy_local --reset. Old registrations and grants are left behind."""
     outcome = deploy_local.run(settings_path, reset=True)
     return result(
         "ok", "deployed fresh contracts: register and attest again",
@@ -207,7 +186,7 @@ def deploy(settings_path: Path) -> dict[str, Any]:
 
 
 def register(settings: dict[str, Any], role: Any) -> dict[str, Any]:
-    """registerUser from the role's account with its salted identity hash (only that hash goes on-chain)."""
+    """registerUser from the role's account with its salted identity hash."""
     role = _role(settings, role)
     if role not in records.REGISTERING_LABELS:
         raise InvalidRequest("only guardian, school and doctor register")
@@ -219,8 +198,8 @@ def register(settings: dict[str, Any], role: Any) -> dict[str, Any]:
 
 
 def attest(settings: dict[str, Any], role: Any) -> dict[str, Any]:
-    """registerVaccination for the guardian's record, sent from the role's own account. Offered to every role
-    on purpose: the registry itself refuses anyone but the trusted clinic (NotTrustedClinic).
+    """registerVaccination for the guardian's record. Offered to every role on purpose: the registry
+    refuses anyone but the trusted clinic (NotTrustedClinic).
     """
     role = _role(settings, role)
     commitment = main.record_snapshot(settings)["commitment"]
@@ -234,8 +213,8 @@ def attest(settings: dict[str, Any], role: Any) -> dict[str, Any]:
 
 
 def grant(settings: dict[str, Any], role: Any, requester: Any, scope: Any, days: Any) -> dict[str, Any]:
-    """grantConsent from the role's account. Every value is checked before any chain call; the reward, if
-    any, is minted by the manager in the same transaction and shown as before -> after.
+    """grantConsent from the role's account. Values are checked before any chain call. The reward, if any,
+    is shown as before -> after.
     """
     role = _role(settings, role)
     requester = _requester(settings, requester, role)
@@ -261,8 +240,8 @@ def grant(settings: dict[str, Any], role: Any, requester: Any, scope: Any, days:
 
 
 def revoke(settings: dict[str, Any], role: Any, requester: Any, scope: Any) -> dict[str, Any]:
-    """revokeConsent from the role's account. A grant that was never made reverts NoConsentToRevoke; one that
-    is already revoked is a no-op in the contract, and the message says so.
+    """revokeConsent from the role's account. Revoking something never granted reverts; revoking twice
+    does nothing and the message says so.
     """
     role = _role(settings, role)
     requester = _requester(settings, requester, role)
@@ -278,19 +257,17 @@ def revoke(settings: dict[str, Any], role: Any, requester: Any, scope: Any) -> d
 
 
 def school_check(settings: dict[str, Any]) -> dict[str, Any]:
-    """disclosure.verify_for_school: always signed as the school, whatever role is selected."""
+    """disclosure.verify_for_school, always signed as the school."""
     return _access(settings, disclosure.verify_for_school)
 
 
 def doctor_view(settings: dict[str, Any]) -> dict[str, Any]:
-    """disclosure.get_doctor_schedule: always signed as the doctor, whatever role is selected."""
+    """disclosure.get_doctor_schedule, always signed as the doctor."""
     return _access(settings, disclosure.get_doctor_schedule)
 
 
 def local_record(settings: dict[str, Any], role: Any) -> dict[str, Any]:
-    """The guardian's own card as parsed fields, for the guardian's view only. Never the raw JSON, the
-    salt or the path, and never for a requester: school and doctor only get disclosure's projections.
-    """
+    """The guardian's own card as parsed fields, only for the guardian's view. Never the raw file, salt or path."""
     if role != "guardian":
         raise Forbidden("only the guardian's own view shows the local record")
     card = main.record_snapshot(settings)["card"]
@@ -298,7 +275,7 @@ def local_record(settings: dict[str, Any], role: Any) -> dict[str, Any]:
 
 
 def access_result(response: AccessResponse) -> dict[str, Any]:
-    """The result for a disclosure AccessResponse, with the console's texts (app/main.py show_response)."""
+    """The result for a disclosure answer, with the console's texts."""
     outcome = response["outcome"]
     if outcome == OUTCOME_ALLOWED:
         fields = response["fields"]
@@ -308,8 +285,8 @@ def access_result(response: AccessResponse) -> dict[str, Any]:
 
 
 def _access(settings: dict[str, Any], request: Any) -> dict[str, Any]:
-    # the owner is the guardian's address. A node that fails while it is looked up is answered like a node
-    # failure inside the request (unavailable, nothing released); the setup hints keep their own messages
+    # the owner is the guardian's address. If the node fails during this lookup, answer "unavailable"
+    # and release nothing; the setup hints keep their own messages
     try:
         client = chain.connect(settings)
         owner = chain.select_account(client, "guardian", settings)
@@ -321,8 +298,8 @@ def _access(settings: dict[str, Any], request: Any) -> dict[str, Any]:
 
 
 def _recorded_deploy_block(settings: dict[str, Any]) -> str:
-    # the block hash deploy_local recorded, which load_contract has just checked against the node. It tells
-    # two deployments apart even at the same addresses (a restarted node reuses the deployer's nonces)
+    # the block hash deploy_local saved. It tells deployments apart even at the same addresses
+    # (a restarted node reuses the deployer's nonces)
     try:
         with open(records.settings_path(settings, "deployment_file"), "rb") as file:
             return str(json.load(file)["deploy_block"]["hash"]).lower()
@@ -331,8 +308,8 @@ def _recorded_deploy_block(settings: dict[str, Any]) -> str:
 
 
 def _deploy_message(error: BaseException) -> str:
-    # deploy_local's texts are short and safe, but meant for its console. Only the first line (which leaves
-    # out the "nothing was saved: <file>" note), and fixed texts for the few that name a file
+    # keep only the first line (it skips the "nothing was saved: <file>" note) and use fixed texts for
+    # messages that name a file
     first = str(error).splitlines()[0] if str(error) else "deploy failed"
     if first.startswith("could not write"):
         return "deployed, but the deployment file could not be saved: run python -m scripts.deploy_local --reset"
@@ -342,7 +319,7 @@ def _deploy_message(error: BaseException) -> str:
 
 
 def _local_state(settings: dict[str, Any]) -> dict[str, Any]:
-    # each file on its own, so one broken identity or salt does not hide the others; the first error is shown
+    # check each file separately so one broken file does not hide the others; show the first error
     local: dict[str, Any] = {"ready": True, "message": "", "identity_hashes": {}, "commitment": None}
 
     def load(key: str, read: Any) -> None:
@@ -364,7 +341,7 @@ def _local_state(settings: dict[str, Any]) -> dict[str, Any]:
 
 
 def _contract_state(contracts: dict[str, Any], accounts: dict[str, str], local: dict[str, Any], now: int) -> dict[str, Any]:
-    # every view of the current deployment the page shows; all of it, or an exception
+    # every chain view the page shows: all of it, or an exception
     registry, manager = contracts["IdentityRegistry"], contracts["ConsentManager"]
     token = contracts["ConsentRewardToken"]
 
@@ -415,7 +392,7 @@ def _contract_state(contracts: dict[str, Any], accounts: dict[str, str], local: 
 
 
 def _consent_status(consent: dict[str, Any], now: int) -> str:
-    # the contract's order (ConsentManager._evaluateAccess): never granted, revoked, expired (exclusive), active
+    # same order as the contract: never granted, revoked, expired, active
     if consent["expires_at"] == 0:
         return "none"
     if consent["revoked"]:
@@ -444,7 +421,7 @@ def _scope(value: Any) -> Scope:
 
 
 def _released(fields: dict[str, Any]) -> str:
-    # the console's wording for an allowed answer
+    # same wording as the console
     if "measles_status" in fields:
         return f"measles status {fields['measles_status']}"
     return ", ".join(f"{event['vaccine']} on {event['date']}" for event in fields["vaccinations"])

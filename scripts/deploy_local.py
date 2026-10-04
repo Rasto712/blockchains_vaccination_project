@@ -1,18 +1,10 @@
 # AI assistance: parts of this file were written with Claude (Anthropic) and thoroughly reviewed.
-"""Local Hardhat deployment helpers.
-Run from the project root after npm run compile, with npm run node running:
+"""Deploys the contracts to the local Hardhat node.
+Run after npm run compile, with npm run node running:
     .venv/bin/python -m scripts.deploy_local [--reset] [--settings PATH]
-Order: registry (clinic as trustedClinic), token, manager (registry and token addresses), then
-setMinterOnce(manager) from the deployer. Each step prints its address, transaction hash, block and gas
-as soon as it is mined, and is verified before the next one starts.
-Everything that needs no transaction is checked first: settings, an existing deployment file (only
-replaced with --reset), artifacts, node and accounts. deployment.json is written once, atomically, after
-every step succeeded, so a failed run leaves the previous file as it was. It records chain_id,
-artifacts_dir, deploy_block (number and hash of the block holding the IdentityRegistry deploy), the three
-addresses and each contract's runtime-code keccak, which chain.load_contract compares to reject a stale
-file, including one from before a node restart. Transactions and errors go through app/chain.py, so a
-revert shows its Solidity error name, for example "ConsentManager deploy failed: NotAContract".
-Printed paths are relative to the project or <data_root>/..., never with the home folder.
+
+Order: registry, token, manager, then setMinterOnce(manager). deployment.json is only written
+after every step worked, so a failed run leaves the old file alone.
 """
 import argparse
 import json
@@ -34,13 +26,11 @@ SETTINGS_FILE = PROJECT_ROOT / "config" / "settings.json"
 
 
 class DeployError(RuntimeError):
-    """A deployment step failed or did not verify. The message is short and safe to print."""
+    """A deployment step failed. The message is short and safe to print."""
 
 
 def load_artifact(name: str) -> dict[str, Any]:
-    """Load one compiled contract artifact from Hardhat's standard output path.
-    A missing artifact raises DeploymentUnavailable; run npm run compile first.
-    """
+    """Load one compiled contract artifact."""
     return chain.read_artifact(name, ARTIFACTS_DIR)
 
 
@@ -50,9 +40,7 @@ def _deploy_contract(
     deployer: str,
     constructor_args: tuple[Any, ...] = (),
 ) -> tuple[str, Receipt]:
-    """Deploy one artifact from the deployer, await success and check that the runtime code at the new
-    address is exactly the compiled contract. Reverts raise TransactionRejected with the error name.
-    """
+    """Deploy one contract and check the code at the new address is the compiled one."""
     artifact = load_artifact(name)
     factory = client.eth.contract(abi=artifact["abi"], bytecode=artifact["bytecode"])
     receipt = chain.send_transaction(client, factory.constructor(*constructor_args), deployer)
@@ -65,10 +53,7 @@ def _deploy_contract(
 
 
 def deploy_registry(client: Any, deployer: str, trusted_clinic: str) -> tuple[str, Receipt]:
-    """Load compiled ABI/bytecode and deploy IdentityRegistry with its clinic constructor argument.
-    Await success and verify runtime bytecode and trustedClinic(); return the actual address and its receipt.
-
-    """
+    """Deploy IdentityRegistry and check its trustedClinic."""
     address, receipt = _deploy_contract(client, "IdentityRegistry", deployer, (trusted_clinic,))
     registry = client.eth.contract(address=address, abi=load_artifact("IdentityRegistry")["abi"])
     configured_clinic = chain.call_view(registry.functions.trustedClinic())
@@ -78,19 +63,12 @@ def deploy_registry(client: Any, deployer: str, trusted_clinic: str) -> tuple[st
 
 
 def deploy_reward_token(client: Any, deployer: str) -> tuple[str, Receipt]:
-    """Deploy ConsentRewardToken and await successful receipt; return its actual address and the receipt.
-    Never invent a placeholder address; a reverting constructor stops the run with its error name.
-
-    """
+    """Deploy ConsentRewardToken."""
     return _deploy_contract(client, "ConsentRewardToken", deployer)
 
 
 def deploy_consent_manager(client: Any, deployer: str, registry_address: str, token_address: str) -> tuple[str, Receipt]:
-    """Deploy the manager with the registry/token addresses from this exact local deployment.
-    Await successful receipt and verify its runtime code; return the address and the receipt.
-    ConsentManager has no getters for its registry or token, so those addresses cannot be read back.
-
-    """
+    """Deploy ConsentManager with the registry and token addresses."""
     return _deploy_contract(
         client,
         "ConsentManager",
@@ -100,10 +78,7 @@ def deploy_consent_manager(client: Any, deployer: str, registry_address: str, to
 
 
 def configure_minter(client: Any, deployer: str, token_address: str, manager_address: str) -> Receipt:
-    """Call setMinterOnce from the deployer only after manager deployment succeeds.
-    Verify the configured address and return the receipt so its gas can be recorded; never leave public unrestricted minting.
-
-    """
+    """Set the manager as the token's minter and check it."""
     token = client.eth.contract(
         address=client.to_checksum_address(token_address),
         abi=load_artifact("ConsentRewardToken")["abi"],
@@ -123,13 +98,7 @@ def save_deployment(
     deploy_block: dict[str, Any],
     replace: bool = False,
 ) -> None:
-    """Save actual addresses, chain ID, artifacts_dir, the deploy block and runtime-code hashes to ignored
-    runtime configuration. deploy_block is {"number": ..., "hash": ...} of the IdentityRegistry deploy.
-    Do not store private keys or overwrite an existing deployment without explicit reset workflow (replace=True).
-    The file is written to a temporary name next to it and then renamed over the target, so it is either
-    the old file or the complete new one, never half written.
-
-    """
+    """Save the deployment info to a file. Written to a temp file first so it is never half written."""
     if path.exists() and not replace:
         raise FileExistsError("deployment file already exists; use --reset")
     for values in (addresses, code_hashes):
@@ -160,11 +129,7 @@ def save_deployment(
 
 
 def deploy_all(client: Any, deployer: str, trusted_clinic: str) -> dict[str, Any]:
-    """Run the four steps in order, printing each as it lands. Any failure raises DeployError naming the step.
-    Returns addresses, receipts (the three deploys and setMinterOnce), runtime-code hashes, deploy_block
-    (number and hash of the block holding the IdentityRegistry deploy) and deployment_costs:
-    evaluation.measure.record_deployment_cost of each deploy receipt, in deploy order.
-    """
+    """Run all four steps in order and return addresses, receipts, code hashes and the deploy block."""
     registry_address, registry_receipt = _step("IdentityRegistry deploy", deploy_registry, client, deployer, trusted_clinic)
     _print_step("IdentityRegistry", registry_address, registry_receipt)
     token_address, token_receipt = _step("ConsentRewardToken deploy", deploy_reward_token, client, deployer)
@@ -205,7 +170,7 @@ def deploy_all(client: Any, deployer: str, trusted_clinic: str) -> dict[str, Any
 
 
 def run(settings_path: Path, reset: bool) -> dict[str, Any]:
-    """Check everything that needs no transaction, deploy, then save deployment.json. Raises DeployError."""
+    """Check everything first, deploy, then save deployment.json."""
     settings = _read_settings(Path(settings_path))
     try:
         deployment_path = records.settings_path(settings, "deployment_file")
@@ -258,13 +223,7 @@ def run(settings_path: Path, reset: bool) -> dict[str, Any]:
 
 
 def main(argv: list[str] | None = None) -> None:
-    """Run registry -> token -> manager -> one-time minter configuration on the verified local node.
-    Print addresses and receipts as each step succeeds, and save deployment.json only after all of them.
-    deploy_all passes the three deploy receipts to evaluation.measure.record_deployment_cost, and run returns
-    those rows (deployment_costs) with every receipt. The gas table (gas_results.csv) comes from
-    python -m evaluation.measure, which deploys fresh contracts per scenario through the same steps.
-    Use --reset after restarting the local Hardhat node. On failure print one readable reason and exit 1.
-    """
+    """Command line entry point. Prints one readable error and exits 1 on failure."""
     parser = argparse.ArgumentParser(description="Deploy the local vaccination contracts")
     parser.add_argument("--reset", action="store_true", help="replace an existing deployment file, e.g. after restarting the node")
     parser.add_argument(
@@ -281,7 +240,7 @@ def main(argv: list[str] | None = None) -> None:
 
 
 def _step(label: str, action: Any, *arguments: Any) -> Any:
-    # one readable line per failure: the step and the Solidity error name or a short cause
+    # turn any failure into a DeployError naming the step
     try:
         return action(*arguments)
     except TransactionRejected as error:

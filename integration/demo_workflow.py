@@ -1,20 +1,11 @@
 # AI assistance: parts of this file were written with Claude (Anthropic) and thoroughly reviewed.
-"""The scripted end-to-end demo on the local Hardhat node.
-Use real local Hardhat transactions and synthetic files, not a simulated permission dictionary.
-Run from the project root after npm run compile, with npm run node running:
+"""Scripted end-to-end demo on the local Hardhat node, using real transactions.
+Run after npm run compile, with npm run node running:
     .venv/bin/python -m integration.demo_workflow [--settings PATH]
 
-main deploys fresh contracts first (scripts/deploy_local, as with --reset, which replaces deployment_file),
-so the demo can run again and again on the same node. Local files and salts are kept, so every identity
-hash and the record commitment are the same as last time. The steps run in the order of this file.
-Tamper comes before revoke, as in DEMO.md; that changes nothing, because tamper only uses the doctor
-grant. The expiry step moves node time forward, so it runs last and only on chain 31337: node time cannot
-go back. Every outcome is checked with expect(), so a wrong result stops the run with "demo FAILED" and
-exit code 1.
-The transcript shows the actor, the action, the outcome and reason, the fields released and each
-transaction's hash, block and gas. It never shows a salt; the only health data shown is the local
-synthetic record, in the attest step. Local files are shown relative to the project or as <data_root>/...,
-never with the home folder.
+It deploys fresh contracts first, so it can be run again and again. The expiry step moves node time
+forward, so it runs last and only on chain 31337. Every result is checked with expect(), and a
+wrong result stops the run with "demo FAILED".
 """
 import argparse
 import json
@@ -32,15 +23,13 @@ from app.models import (
 from scripts import deploy_local
 
 SETTINGS_FILE = records.PROJECT_ROOT / "config" / "settings.json"
-# the only chain whose time the demo may move
 LOCAL_CHAIN_ID = 31337
 GRANT_DAYS = 30
 REGRANT_DAYS = 1
 DAY_SECONDS = 24 * 60 * 60
-# relative to the data root (records.data_root: settings data_root, runtime-data by default); main passes
-# data_root / TAMPER_COPY, which is inside the data root as demonstrate_tampering requires
+# where the tampered copy goes, inside the data root
 TAMPER_COPY = Path("tamper") / "vaccination_record.json"
-# every AccessAttempt the story logs, in order: (requester label, scope, allowed, reason)
+# the access attempts the story should log, in order
 EXPECTED_AUDIT = [
     ("school", Scope.MEASLES_STATUS, False, "NO_CONSENT"),
     ("school", Scope.MEASLES_STATUS, True, "ALLOWED"),
@@ -49,22 +38,17 @@ EXPECTED_AUDIT = [
     ("school", Scope.MEASLES_STATUS, False, "REVOKED"),
     ("school", Scope.MEASLES_STATUS, False, "EXPIRED"),
 ]
-# transcript indent under the actor column
+# indent for the output lines
 PAD = " " * 10
 
 
 def deploy_demo_contracts(settings_path: Path) -> None:
-    """Deploy fresh contracts with scripts/deploy_local, replacing deployment_file as --reset does.
-    Everything registered or granted on the previous contracts is left behind, so each run starts clean.
-    """
+    """Deploy fresh contracts so each run starts clean."""
     deploy_local.run(settings_path, reset=True)
 
 
 def register_demo_accounts(settings: dict[str, Any]) -> None:
-    """Register separate synthetic guardian, school and doctor identities; keep signer labels distinct.
-    Runs records.setup_runtime first (existing files and salts are kept). Only the salted identity hash
-    goes on-chain; deployer and clinic never register.
-    """
+    """Register the guardian, school and doctor identities. Only the identity hash goes on-chain."""
     created = records.setup_runtime(settings)
     for path in created:
         print(f"setup: created {_shown(path, settings)}")
@@ -90,9 +74,8 @@ def register_demo_accounts(settings: dict[str, Any]) -> None:
 
 
 def attest_demo_record(settings: dict[str, Any]) -> None:
-    """Save/freeze local bytes, compute commitment and register it from the trusted clinic.
-    Shows the local JSON and the registered commitment. The guardian's own attempt comes first and must be
-    rejected with NotTrustedClinic, because only the registry's trusted clinic may attest.
+    """The clinic registers the record's hash.
+    The guardian tries first and must be rejected with NotTrustedClinic.
     """
     record_path = records.settings_path(settings, "vaccination_file")
     snapshot = records.load_snapshot(record_path, records.settings_path(settings, "vaccination_salt_file"))
@@ -122,9 +105,7 @@ def attest_demo_record(settings: dict[str, Any]) -> None:
 
 
 def demonstrate_school_flow(settings: dict[str, Any]) -> None:
-    """Assert denied-before-grant, committed grant/reward and permitted status-only response.
-    The first school grant mints exactly one reward unit to the guardian, in the grant transaction.
-    """
+    """School is denied before consent, then gets only the measles status. The first grant rewards the guardian."""
     client, accounts, contracts = _session(settings)
     guardian, school = accounts["guardian"], accounts["school"]
     response = disclosure.verify_for_school(settings, guardian)
@@ -142,14 +123,12 @@ def demonstrate_school_flow(settings: dict[str, Any]) -> None:
 
 
 def demonstrate_doctor_flow(settings: dict[str, Any]) -> None:
-    """Assert doctor-specific consent returns only vaccine/date, never the complete JSON.
-    It is the first grant of this (guardian, doctor, scope) consent, so it mints one more reward unit.
-    """
+    """Doctor gets only vaccine and date. Another first grant, so another reward."""
     card = records.load_snapshot(
         records.settings_path(settings, "vaccination_file"),
         records.settings_path(settings, "vaccination_salt_file"),
     )["card"]
-    # built here from the card, not with disclosure's own projection, so the check is independent
+    # built separately so the check does not reuse disclosure's code
     expected = {"vaccinations": [{"vaccine": event["vaccine"], "date": event["date"]} for event in card["vaccinations"]]}
 
     client, accounts, contracts = _session(settings)
@@ -163,20 +142,12 @@ def demonstrate_doctor_flow(settings: dict[str, Any]) -> None:
 
 
 def demonstrate_tampering(settings: dict[str, Any], copied_fixture: Path) -> None:
-    """Run while the doctor grant is still active, before any time advance.
-    Copy the vaccination_file to copied_fixture (main passes <data root>/tamper/vaccination_record.json)
-    and change one byte inside the batch value (ABC123-DEMO to ABC124-DEMO) so it still validates.
-    copied_fixture is relative to the project root like every settings path (an absolute path is used as
-    given) and must be a new file inside records.data_root(settings).
-    Run the doctor request with a copy of settings whose vaccination_file points to the copy
-    (operator setting, never requester input).
-    Assert denied (HASH_MISMATCH) and no payload, delete the copy even if something fails, then show the
-    original still verifies. The frozen file is never opened for writing and no replacement hash is registered.
+    """Change one byte in a copy of the record and check the doctor request is denied (HASH_MISMATCH).
+    The copy is deleted afterwards and the original is never written.
     """
     original = records.settings_path(settings, "vaccination_file")
-    # relative to the project root like every settings path, so the write and the request see the same file
     copy_path = records.PROJECT_ROOT / Path(copied_fixture)
-    # refuse an existing file, so the frozen record or a salt can never be overwritten or deleted here
+    # never overwrite or delete an existing file
     expect(not copy_path.exists() and copy_path.resolve() != original.resolve(), "tamper copy must be a new file")
     expect(records.data_root(settings).resolve() in copy_path.resolve().parents, "tamper copy must be inside the data root")
     client = chain.connect(settings)
@@ -202,12 +173,8 @@ def demonstrate_tampering(settings: dict[str, Any], copied_fixture: Path) -> Non
 
 
 def demonstrate_revocation_and_expiry(settings: dict[str, Any]) -> None:
-    """Revoke school consent and assert denied (REVOKED). Then regrant school for 1 day (assert no second
-    reward), set the next block timestamp to expiresAt with evm_setNextBlockTimestamp and assert denied (EXPIRED).
-    Run this last: node time cannot go back.
-    expiresAt is read with chain.get_consent and must be the regrant's block time plus one day. One second
-    before it, a mined empty block shows the checkAccess view still allows (a view logs and releases
-    nothing); the logged request is then mined at exactly expiresAt, which is already expired.
+    """Revoke the school's consent, regrant it for 1 day, then move node time to the exact expiry.
+    Run this last, because node time cannot go back.
     """
     client, accounts, contracts = _session(settings)
     guardian, school = accounts["guardian"], accounts["school"]
@@ -250,10 +217,7 @@ def demonstrate_revocation_and_expiry(settings: dict[str, Any]) -> None:
 
 
 def show_rewards_and_audit(settings: dict[str, Any]) -> None:
-    """Print every actor's reward balance and this deployment's on-chain AccessAttempt log, and check both
-    against the story: two reward units, both the guardian's (one per first grant, none for the regrant),
-    and the six logged attempts in order, the denials included.
-    """
+    """Print the reward balances and the audit log, and check them against the story."""
     client, accounts, contracts = _session(settings)
     token, manager = contracts["ConsentRewardToken"], contracts["ConsentManager"]
     balances = {label: chain.get_reward_balance(token, account=address) for label, address in accounts.items()}
@@ -281,10 +245,7 @@ def show_rewards_and_audit(settings: dict[str, Any]) -> None:
 
 
 def main(argv: list[str] | None = None) -> None:
-    """Run the complete story, asserting each result and recording genuine receipts/events.
-    Deploys fresh contracts, then runs every step of this file in order on the local node (chain 31337
-    only). On a wrong outcome or an unreachable node print one line naming the step and exit 1.
-    """
+    """Run every step in order. A wrong result or an unreachable node prints one line and exits 1."""
     parser = argparse.ArgumentParser(description="Run the scripted My Vaccination Card demo on the local Hardhat node")
     parser.add_argument(
         "--settings", type=Path, default=SETTINGS_FILE, metavar="PATH",
@@ -319,7 +280,6 @@ def main(argv: list[str] | None = None) -> None:
         print(f"\n== {number}. {title} ==", flush=True)
         try:
             step()
-        # RecordError and chain.py's caller mistakes are ValueErrors; none of these messages hold data or salts
         except (AssertionError, ValueError, deploy_local.DeployError) as error:
             _fail(number, str(error))
         except TransactionRejected as error:
@@ -333,17 +293,13 @@ def main(argv: list[str] | None = None) -> None:
         except Web3NotInstalled:
             _fail(number, disclosure.NO_WEB3_MESSAGE)
         except ChainUnavailable as error:
-            # chain.py and advance_time keep these messages free of details
             _fail(number, f"unavailable: {error.args[0] if error.args else 'local node not reachable'}")
     print("\ndemo passed: every outcome above was checked")
 
 
 def advance_time(client: Any, timestamp: int, mine: bool = False) -> None:
-    """Make timestamp the time of the next block on the local node (evm_setNextBlockTimestamp).
-    With mine=True an empty block is mined at it straight away (evm_mine), so views, which read the latest
-    block, see the new time. Without it the next transaction itself is mined at exactly timestamp.
-    Refuses unless the chain ID is 31337 (ChainUnavailable) and unless timestamp is after the latest block
-    (ValueError): node time only moves forward.
+    """Set the time of the next block (and mine it if mine=True).
+    Only works on chain 31337 and only forwards in time.
     """
     if isinstance(timestamp, bool) or not isinstance(timestamp, int):
         raise ValueError("timestamp must be a whole number of seconds")
@@ -357,17 +313,16 @@ def advance_time(client: Any, timestamp: int, mine: bool = False) -> None:
 
 
 def expect(condition: bool, message: str) -> None:
-    """Demo check that still runs under python -O, unlike assert."""
+    """Like assert, but still runs with python -O."""
     if not condition:
         raise AssertionError(message)
 
 
 def _check_local_node(settings: dict[str, Any]) -> None:
-    # before anything is deployed: the expiry step would refuse on any other chain at the very end
+    # check early, the expiry step only works on the local chain
     try:
         client = chain.connect(settings)
     except Web3NotInstalled:
-        # the node may be running; starting it again would not help
         raise
     except ChainUnavailable as error:
         reason = error.args[0] if error.args else "local node not reachable"
@@ -379,7 +334,7 @@ def _check_local_node(settings: dict[str, Any]) -> None:
 
 
 def _session(settings: dict[str, Any]) -> tuple[Any, dict[str, str], dict[str, Any]]:
-    # one connection, every actor's account and the three contracts of the current deployment
+    # connection, all accounts and the three contracts
     client = chain.connect(settings)
     accounts = {label: chain.select_account(client, label, settings) for label in settings["actor_account_indices"]}
     deployment = records.settings_path(settings, "deployment_file")
@@ -390,7 +345,7 @@ def _session(settings: dict[str, Any]) -> tuple[Any, dict[str, str], dict[str, A
 def _grant(
     client: Any, contracts: dict[str, Any], guardian: str, label: str, requester: str, scope: Scope, days: int, reward: int,
 ) -> Receipt:
-    # the guardian grants; the reward (if any) is minted by the manager inside the same transaction
+    # the manager mints the reward inside the grant transaction
     token, manager = contracts["ConsentRewardToken"], contracts["ConsentManager"]
     before = chain.get_reward_balance(token, account=guardian)
     receipt = chain.grant_consent(manager, guardian=guardian, requester=requester, scope=scope, duration_days=days)
@@ -444,7 +399,7 @@ def _show_access(client: Any, actor: str, action: str, response: AccessResponse)
 
 
 def _mined(client: Any, transaction_hash: str) -> Receipt:
-    # the access response carries only the hash; block and gas come from the node's receipt
+    # the response only has the hash, so get block and gas from the node
     raw = _node(lambda: client.eth.get_transaction_receipt(transaction_hash))
     return {
         "transaction_hash": transaction_hash,
@@ -461,7 +416,7 @@ def _block_timestamp(client: Any, block: int | str) -> int:
 
 
 def _node(request: Callable[[], Any]) -> Any:
-    # raw node requests app.chain has no helper for; any failure is ChainUnavailable without details
+    # for node requests chain.py has no helper for
     try:
         return request()
     except Exception as error:
@@ -482,7 +437,6 @@ def _utc(timestamp: int) -> str:
 
 
 def _scope_name(value: int) -> str:
-    # events can carry any uint8 scope
     return Scope(value).name if value in (1, 2) else f"scope {value} (unsupported)"
 
 

@@ -1,8 +1,6 @@
 # AI assistance: parts of this file were written with Claude (Anthropic) and thoroughly reviewed.
-"""Offline tests for integration/demo_workflow.py: the whole scripted story, its failure lines, advance_time
-and the tamper copy under settings data_root. No node: the fake chain stands in for app.chain, FakeNode
-adds the few raw node calls the demo makes itself (block times, receipts, the two Hardhat time methods),
-and deploy_local.run is mocked. The live runs on a real node are in evaluation/results/test_results.csv.
+"""Offline tests for integration/demo_workflow.py using the fake chain, with deploy_local.run mocked.
+The live runs on a real node are in evaluation/results/test_results.csv.
 """
 import base64
 import contextlib
@@ -31,9 +29,7 @@ RECORD_ONLY_TEXT = ("child-demo-001", "ABC123-DEMO", "Clinic A", "rubella", "mum
 
 
 class FakeNode(FakeChain):
-    """FakeChain plus block times: each transaction opens a block one second after the latest, unless
-    evm_setNextBlockTimestamp set its time; views read the latest block's time, as the contracts do.
-    """
+    """FakeChain plus block times (each transaction mines a block one second later)."""
 
     def __init__(self, settings, chain_id=31337):
         super().__init__(settings)
@@ -89,9 +85,7 @@ class FakeNode(FakeChain):
 
 
 class DemoTestCase(unittest.TestCase):
-    """A temporary project folder (PROJECT_ROOT and the default DATA_ROOT point into it) and a settings
-    file whose data paths are absolute and point to data_root, which is outside that project folder.
-    """
+    """A temporary project folder with settings that point to a data_root outside it."""
 
     def setUp(self):
         folder = tempfile.TemporaryDirectory()
@@ -144,7 +138,7 @@ class DemoTestCase(unittest.TestCase):
         return output
 
     def sections(self, output):
-        """The transcript split by its "== N. title ==" headers: {N: text}."""
+        """Split the output by its "== N. title ==" headers."""
         parts = re.split(r"^== (\d+)\. .* ==$", output, flags=re.MULTILINE)
         return {int(number): text for number, text in zip(parts[1::2], parts[2::2])}
 
@@ -336,7 +330,7 @@ class FailureTests(DemoTestCase):
 
 
 class MutatedChainTests(DemoTestCase):
-    """The demo's own checks catch a chain that breaks a rule, one rule per fake."""
+    """The demo's own checks catch a chain that breaks a rule."""
 
     def run_with(self, fake_class):
         self.fake = fake_class(self.settings)

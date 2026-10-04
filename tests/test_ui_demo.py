@@ -1,8 +1,5 @@
 # AI assistance: parts of this file were written with Claude (Anthropic) and thoroughly reviewed.
-"""Endpoint tests for the web UI's guided demo and demo controls (ui/demo.py), over real HTTP with the fake
-node of tests/test_demo.py, as in tests/test_ui.py. The mocked deploy clears the fake's contract state, so
-every start of the guided demo gets "fresh contracts" while node time goes on, as on a real node.
-"""
+"""Endpoint tests for the web UI guided demo (ui/demo.py), using the fake node from tests/test_demo.py."""
 import json
 import unittest
 from pathlib import Path

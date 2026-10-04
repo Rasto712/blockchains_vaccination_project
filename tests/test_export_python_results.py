@@ -1,9 +1,5 @@
 # AI assistance: parts of this file were written with Claude (Anthropic) and thoroughly reviewed.
-"""Offline tests for evaluation/export_python_results.py: the parts that need no node. unittest summaries,
-the private-value and leak search, storage words, the rows and the CSV, the commit text, settings, main,
-and the PY-11 checks on a (mocked) demo run.
-The live checks themselves run on a node and their results are evaluation/results/test_results.csv.
-"""
+"""Offline tests for evaluation/export_python_results.py (the parts that need no node)."""
 import base64
 import contextlib
 import csv

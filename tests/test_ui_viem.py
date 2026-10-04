@@ -1,9 +1,6 @@
 # AI assistance: parts of this file were written with Claude (Anthropic) and thoroughly reviewed.
-"""Node-free tests for the server side of the page's Viem layer: GET /api/contracts, /api/identity-hash and
-/api/record-commitment, the lean /api/state, the Content-Security-Policy with the node's origin, and the files
-the page loads for Viem (the prebuilt bundle and chain.js). Viem itself runs in the browser; the same page was
-clicked through on a real node. Every JSON answer also goes through UITestCase's leak check (no path, salt,
-identity value or record field).
+"""Node-free tests for the server side of the page's Viem layer (/api/contracts, /api/identity-hash,
+/api/record-commitment, /api/state and the Content-Security-Policy).
 """
 import json
 import re

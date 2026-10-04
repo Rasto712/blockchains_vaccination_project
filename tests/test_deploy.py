@@ -1,9 +1,6 @@
 # AI assistance: parts of this file were written with Claude (Anthropic) and thoroughly reviewed.
-"""Offline tests for scripts/deploy_local.py: no node; the client, the chain connection and the deploy
-steps are mocked. Covers the existing-file check before any transaction, --reset keeping the old file until
-every step succeeded, the atomic write, readable failures with the Solidity error name, the trustedClinic,
-minter and runtime-code checks, the recorded deploy block, and printed paths that never show the home
-folder. Skipped when web3 is not installed.
+"""Offline tests for scripts/deploy_local.py. No node, everything is mocked.
+Skipped when web3 is not installed.
 """
 import contextlib
 import io

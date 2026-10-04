@@ -1,28 +1,12 @@
 # AI assistance: parts of this file were written with Claude (Anthropic) and thoroughly reviewed.
-"""One Python-to-local-Hardhat boundary.
-Uses web3 8.0.0 (requirements.txt). No connection is opened on import, and web3 is
-imported inside the functions, so importing this module needs only the standard library.
+"""Talks to the local Hardhat node through web3.
+web3 is only imported inside functions, so importing this file needs nothing extra.
 
-Errors: every RPC call goes through one mapping (_rpc_errors), so node and web3 failures reach callers
-only as the three model exceptions. A revert becomes TransactionRejected holding only the Solidity error
-name, found by matching the 4-byte selector against the error entries of the three compiled ABIs. That
-covers ContractLogicError from eth_call/eth_estimateGas and the Web3RPCError Hardhat 3 answers with when a
-transaction reverts at send time. A panic is "Panic"; an unknown selector, and a receipt with status 0, is
-"Reverted". RPC down, timeouts, wrong chain ID and any other node failure before a transaction is sent map
-to ChainUnavailable. Once a transaction hash exists, no receipt in time (TimeExhausted) and a node that
-stops answering while Python waits both map to TransactionPending, because the transaction may still be
-mined. A missing, stale or mismatched deployment.json maps to DeploymentUnavailable, a missing compiled
-artifact to ArtifactUnavailable (its subclass) and a missing web3 to Web3NotInstalled; all three are
-ChainUnavailable subclasses. Anything else raised inside the mapping, such as a KeyError, a TypeError or an
-ABI function that does not exist, is a bug rather than a node failure and goes up unchanged, so the menu
-prints "failed: <type>". Never include calldata or local data in messages.
-Caller mistakes stay ValueError: an address that is not one, a hash that is not 32 bytes, a scope outside
-0-255 or a duration outside 0-65535. Business rules (supported scopes, 1-365 days) are the contract's, so
-they come back as named reverts or as a denial reason, the same as tests/fake_chain.py.
+Node and web3 errors are turned into our own exceptions (ChainUnavailable, TransactionRejected,
+TransactionPending). A revert only carries the Solidity error name. Bad arguments are a ValueError.
+Other errors are bugs and are not caught.
 
-Convention: in transaction helpers the first address after the contract is the signer; view helpers
-follow the contract argument order; callers pass owner/requester/guardian as keywords. Addresses may be
-given in any case; they are checksummed before use.
+In the transaction helpers the first address after the contract is the signer.
 """
 import json
 from collections.abc import Iterator
@@ -37,29 +21,23 @@ from app.models import (
 from app.records import PROJECT_ROOT
 
 CONTRACT_NAMES = ("IdentityRegistry", "ConsentManager", "ConsentRewardToken")
-# where npm run compile writes artifacts, relative to the project root; deploy_local records it
+# where npm run compile writes artifacts
 DEFAULT_ARTIFACTS_DIR = "artifacts/contracts"
-# one attempt per request and no retries, so a stalled node fails within this many seconds
+# no retries, so a stuck node fails after this many seconds
 RPC_TIMEOUT_SECONDS = 10
 RECEIPT_TIMEOUT_SECONDS = 30
 PANIC_SELECTOR = "0x4e487b71"
 MODEL_ERRORS = (ChainUnavailable, TransactionRejected, TransactionPending)
-# ChainUnavailable message when web3 cannot be imported (Web3NotInstalled)
 WEB3_MISSING = "web3 not installed"
 
-# 4-byte selector ("0x" + 8 hex digits) -> Solidity error name, filled from every artifact read
+# error selector -> Solidity error name
 _error_names: dict[str, str] = {}
-# set once the three default artifacts have been read for their errors
+# true once the default artifacts have been read
 _default_errors_loaded = False
 
 
 def load_settings(path: Path) -> dict[str, Any]:
-    """Read RPC URL, expected chain ID, deployment/ABI references and actor account indices.
-    Resolve paths relative to the project root. Contract addresses must be deployed values, not null placeholders.
-    Read settings, then load deployment_file; its addresses must be non-null; ABIs come from artifacts_dir
-    (<artifacts_dir>/<Name>.sol/<Name>.json, keys abi and bytecode).
-    The console reads settings with plain json instead, so it works before anything is deployed.
-    """
+    """Read the settings file and the deployment file, and check the deployment is usable."""
     try:
         with Path(path).open("r", encoding="utf-8") as file:
             settings = json.load(file)
@@ -86,11 +64,7 @@ def load_settings(path: Path) -> dict[str, Any]:
 
 
 def connect(settings: dict[str, Any]) -> Any:
-    """Connect only to the explicitly selected local Hardhat RPC and verify its chain ID.
-    Return an initialized client; reject unavailable/mismatched networks. No remote endpoint or key fallback.
-    Requests time out after RPC_TIMEOUT_SECONDS and are never retried, so a stalled node fails fast.
-    Without web3 this raises Web3NotInstalled; a missing rpc_url or expected_chain_id is ChainUnavailable.
-    """
+    """Connect to the local node and check the chain ID. Requests time out and are not retried."""
     try:
         from web3 import Web3
     except ImportError as error:
@@ -100,7 +74,7 @@ def connect(settings: dict[str, Any]) -> Any:
         rpc_url, expected_chain_id = settings["rpc_url"], settings["expected_chain_id"]
     except (KeyError, TypeError):
         rpc_url = expected_chain_id = None
-    # an empty URL would make web3 fall back to another endpoint
+    # an empty URL would make web3 pick another endpoint
     if not isinstance(rpc_url, str) or not rpc_url.strip():
         raise ChainUnavailable("settings unavailable")
 
@@ -119,10 +93,7 @@ def connect(settings: dict[str, Any]) -> Any:
 
 
 def select_account(client: Any, actor_label: str, settings: dict[str, Any]) -> str:
-    """Resolve a predefined demo label to its local unlocked account.
-    Unknown labels fail; do not silently choose guardian or deployer. This is demo mode, not production authentication.
-
-    """
+    """Turn a demo label like 'guardian' into its local account address. Demo only, not real login."""
     account_indices = settings["actor_account_indices"]
 
     if actor_label not in account_indices:
@@ -141,10 +112,7 @@ def select_account(client: Any, actor_label: str, settings: dict[str, Any]) -> s
 
 
 def read_artifact(name: str, artifacts_dir: str = DEFAULT_ARTIFACTS_DIR) -> dict[str, Any]:
-    """Read one compiled Hardhat artifact, <artifacts_dir>/<Name>.sol/<Name>.json under the project root.
-    A missing or unreadable artifact raises ArtifactUnavailable (run npm run compile). Its error
-    entries are added to the selector map, so reverts from this contract resolve to their names.
-    """
+    """Read one compiled contract artifact and remember its error names."""
     if name not in CONTRACT_NAMES:
         raise ValueError("unknown contract")
     try:
@@ -164,17 +132,14 @@ def read_artifact(name: str, artifacts_dir: str = DEFAULT_ARTIFACTS_DIR) -> dict
 
 
 def runtime_code(client: Any, address: str) -> bytes:
-    """The runtime code at address as raw bytes; empty when nothing is deployed there."""
+    """Code deployed at an address (empty if nothing is there)."""
     address = _address(address)
     with _rpc_errors():
         return bytes(client.eth.get_code(address))
 
 
 def block_hash(client: Any, number: int) -> str | None:
-    """Hash of block number on this node as lowercase 0x-hex; None when the node has no such block.
-    deploy_local records it for the block of the IdentityRegistry deploy and load_contract compares it:
-    a restarted node mines its blocks at other times, so the hash differs even for identical transactions.
-    """
+    """Hash of a block on this node, or None if the block does not exist."""
     from web3 import Web3
     from web3.exceptions import BlockNotFound
 
@@ -189,17 +154,14 @@ def block_hash(client: Any, number: int) -> str | None:
 
 
 def code_hash(code: bytes) -> str:
-    """keccak-256 of runtime code as 0x-hex; deploy_local records it and load_contract compares it."""
+    """keccak hash of contract code."""
     from web3 import Web3
 
     return Web3.to_hex(Web3.keccak(bytes(code)))
 
 
 def matches_artifact(code: bytes, artifact: dict[str, Any]) -> bool:
-    """True when runtime code is exactly the artifact's deployedBytecode.
-    Immutable values (such as the token's deployer) are filled in at deployment, so their byte ranges
-    from immutableReferences are masked in both before comparing.
-    """
+    """True if the deployed code equals the compiled code. Immutable slots are blanked out first."""
     try:
         expected = bytearray.fromhex(artifact["deployedBytecode"].removeprefix("0x"))
         actual = bytearray(code)
@@ -216,15 +178,8 @@ def matches_artifact(code: bytes, artifact: dict[str, Any]) -> bool:
 
 
 def load_contract(client: Any, name: str, deployment_path: Path) -> Any:
-    """Read a compiled ABI and deployed address for one of the three named contracts.
-    Check address/network provenance; never treat an unconfigured placeholder as a real deployment.
-    The deployment must be for this node's chain ID, the block deploy_local recorded (deploy_block, the
-    block of the IdentityRegistry deploy) must still have the same hash on this node, the code at the
-    address must hash to the value deploy_local recorded, and it must still be the compiled contract.
-    The block check tells a restarted node apart even when the same deployer nonces later deployed
-    byte-identical contracts at the same addresses (python -m evaluation.measure does exactly that).
-    A missing, stale or mismatched deployment.json raises DeploymentUnavailable; a missing compiled
-    artifact raises ArtifactUnavailable.
+    """Load a contract after checking the deployment still matches this node.
+    Checks the chain ID, the deploy block hash, the code hash and the compiled code.
     """
     if name not in CONTRACT_NAMES:
         raise ValueError("unknown contract")
@@ -238,7 +193,6 @@ def load_contract(client: Any, name: str, deployment_path: Path) -> Any:
         artifacts_dir = deployment["artifacts_dir"]
         deploy_block, recorded_block_hash = _deploy_block(deployment["deploy_block"])
     except (OSError, KeyError, TypeError, ValueError) as error:
-        # also a null placeholder address, which _address rejects, and a file without deploy_block
         raise DeploymentUnavailable("deployment unavailable") from error
 
     artifact = read_artifact(name, artifacts_dir)
@@ -261,10 +215,7 @@ def load_contract(client: Any, name: str, deployment_path: Path) -> Any:
 
 
 def send_transaction(client: Any, call: Any, sender: str) -> Receipt:
-    """Send one prepared contract call or constructor from sender and wait for its successful receipt.
-    Every transaction in chain.py and deploy_local takes this path, so errors map the same way everywhere:
-    a node failure before the transaction hash exists is ChainUnavailable, one after it TransactionPending.
-    """
+    """Send a prepared call from sender and wait for a successful receipt."""
     sender = _address(sender)
     with _rpc_errors():
         transaction_hash = call.transact({"from": sender})
@@ -272,25 +223,20 @@ def send_transaction(client: Any, call: Any, sender: str) -> Receipt:
 
 
 def call_view(call: Any) -> Any:
-    """Run one prepared view call; a revert is TransactionRejected with its error name."""
+    """Run a read-only call. A revert becomes TransactionRejected."""
     with _rpc_errors():
         return call.call()
 
 
 def register_user(registry: Any, account: str, identity_hash: bytes) -> Receipt:
-    """Submit registerUser from the selected account and await a successful receipt.
-    Reject wrong hash length; never upload the raw identity fixture.
-    """
+    """Register the account's identity hash."""
     account = _address(account)
     _require_hash(identity_hash, "identity hash")
     return _transact(registry, "registerUser", (identity_hash,), account)
 
 
 def register_vaccination(registry: Any, clinic: str, guardian: str, record_hash: bytes) -> Receipt:
-    """Submit the frozen record commitment from the trusted clinic account.
-    Do not substitute the deployer when the selected clinic lacks authority.
-
-    """
+    """The clinic registers the record hash for a guardian."""
     clinic = _address(clinic)
     guardian = _address(guardian)
     _require_hash(record_hash, "record hash")
@@ -298,9 +244,7 @@ def register_vaccination(registry: Any, clinic: str, guardian: str, record_hash:
 
 
 def get_user_info(registry: Any, account: str) -> IdentityInfo:
-    """Decode the registered flag and two commitments using the contract ABI.
-    A view query is not a logged data-access transaction.
-    """
+    """Read the registered flag and the two hashes for an account."""
     account = _address(account)
     with _rpc_errors():
         registered, identity_hash, vaccination_hash = _view(registry, "getUserInfo", (account,))
@@ -312,11 +256,7 @@ def get_user_info(registry: Any, account: str) -> IdentityInfo:
 
 
 def grant_consent(manager: Any, guardian: str, requester: str, scope: Scope, duration_days: int) -> Receipt:
-    """Submit the grant from the guardian wallet and await its receipt.
-    The contract checks the scope (UnsupportedScope) and the 1-365 day range (InvalidDuration); here only
-    values that cannot be encoded (scope outside 0-255, days outside 0-65535) are a ValueError.
-    Raise TransactionRejected on revert. Do not independently mint rewards in Python; the manager owns that atomic action.
-    """
+    """The guardian grants a requester access to a scope for some days. The contract checks the rules."""
     guardian = _address(guardian)
     requester = _address(requester)
     arguments = (requester, _scope(scope), _duration(duration_days))
@@ -324,20 +264,14 @@ def grant_consent(manager: Any, guardian: str, requester: str, scope: Scope, dur
 
 
 def revoke_consent(manager: Any, guardian: str, requester: str, scope: Scope) -> Receipt:
-    """Submit caller-owned revocation and await its receipt.
-    Do not modify the lifetime rewarded flag or another owner's consent. An unsupported scope reverts
-    UnsupportedScope in the contract.
-    """
+    """The guardian revokes a requester's consent for a scope."""
     guardian = _address(guardian)
     requester = _address(requester)
     return _transact(manager, "revokeConsent", (requester, _scope(scope)), guardian)
 
 
 def check_access(manager: Any, owner: str, requester: str, scope: Scope) -> ConsentDecision:
-    """Read current registration/evidence/consent permission without releasing any data.
-    This view supports the final recheck but never replaces the logged access transaction.
-    An unsupported scope is the contract's answer (False, UNSUPPORTED_SCOPE), not an exception.
-    """
+    """Ask the contract if access is allowed right now. Nothing is logged or released."""
     owner = _address(owner)
     requester = _address(requester)
     scope_code = _scope(scope)
@@ -356,10 +290,7 @@ def check_access(manager: Any, owner: str, requester: str, scope: Scope) -> Cons
 
 
 def get_consent(manager: Any, owner: str, requester: str, scope: Scope) -> ConsentInfo:
-    """Read the stored grant for (owner, requester, scope): its exclusive expiry and revoked flag.
-    expires_at == 0 means never granted. For display and the demo's exact-expiry step; it never
-    grants anything by itself.
-    """
+    """Read the stored grant (expiry time and revoked flag). expires_at 0 means never granted."""
     owner = _address(owner)
     requester = _address(requester)
     scope_code = _scope(scope)
@@ -369,12 +300,8 @@ def get_consent(manager: Any, owner: str, requester: str, scope: Scope) -> Conse
 
 
 def request_access(manager: Any, requester: str, owner: str, scope: Scope, observed_hash: bytes) -> AccessAttempt:
-    """Submit requestAccess from the requester, wait for its receipt and decode the matching event.
-    Require expected owner/requester/scope and correct emitter. Business denial is allowed=false,
-    not a reverted transaction; a missing or wrong event is ChainUnavailable and a reverted receipt
-    TransactionRejected, both of which the caller treats as unavailable.
-    The scope is not checked against 1 and 2, so any uint8 can be logged as a denial.
-
+    """The requester logs an access request and we read back the event.
+    A denial is allowed=False, not an error.
     """
     requester = _address(requester)
     owner = _address(owner)
@@ -393,11 +320,8 @@ def request_access(manager: Any, requester: str, owner: str, scope: Scope, obser
 
 
 def wait_for_receipt(client: Any, transaction_hash: str) -> Receipt:
-    """Wait with a bounded timeout and return status, gas, block, logs and any new contract address.
-    A hash/timeout/pending submission must never be presented as committed success.
-    Status 0 raises TransactionRejected("Reverted"). The transaction was already sent, so no receipt in
-    time, and a node that stops answering (or goes down) while Python waits, raise TransactionPending,
-    not ChainUnavailable: it may still be mined, so nothing is known either way.
+    """Wait for the receipt. Status 0 is TransactionRejected.
+    If no receipt arrives, the transaction may still be mined, so it is TransactionPending.
     """
     from web3 import Web3
 
@@ -430,12 +354,7 @@ def wait_for_receipt(client: Any, transaction_hash: str) -> Receipt:
 
 
 def decode_access_event(receipt: Receipt, manager: Any) -> AccessAttempt:
-    """Decode the exact AccessAttempt log emitted by ConsentManager.
-    Validate emitter and fields; no log means no permission. Record transaction hash for audit display.
-    Decodes with the ABI of the manager already loaded by load_contract, via
-    manager.events.AccessAttempt().process_receipt. process_receipt does not filter by address, so keep
-    only logs whose address equals the manager's, discard other events quietly, and require exactly one.
-    """
+    """Find the one AccessAttempt event emitted by the manager in a receipt."""
     from web3 import Web3
     from web3.logs import DISCARD
 
@@ -473,21 +392,14 @@ def decode_access_event(receipt: Receipt, manager: Any) -> AccessAttempt:
 
 
 def get_reward_balance(token: Any, account: str) -> int:
-    """Read reward units for display only. The balance must never be used to bypass consent.
-    A revert is TransactionRejected like any other call, not ChainUnavailable.
-
-    """
+    """Read reward tokens for display only."""
     account = _address(account)
     with _rpc_errors():
         return int(_view(token, "balanceOf", (account,)))
 
 
 def list_access_events(manager: Any, from_block: int) -> list[AccessAttempt]:
-    """Query bounded AccessAttempt events and display minimal audit metadata.
-    No delete-log operation is part of the design; no medical JSON belongs in these events.
-    Keep unknown scope codes as int; display as 'scope 3 (unsupported)'; never raise.
-
-    """
+    """Read all AccessAttempt events from a block onwards."""
     from web3 import Web3
 
     if isinstance(from_block, bool) or not isinstance(from_block, int) or from_block < 0:
@@ -517,9 +429,7 @@ def list_access_events(manager: Any, from_block: int) -> list[AccessAttempt]:
 
 
 def error_name(revert_data: Any) -> str:
-    """Solidity error name for revert data (a 0x-hex string, or a dict holding one under "data").
-    "Panic" for a Solidity panic, the name from the compiled ABIs for a custom error, else "Reverted".
-    """
+    """Solidity error name for revert data, 'Panic' for a panic, otherwise 'Reverted'."""
     if isinstance(revert_data, dict):
         revert_data = revert_data.get("data")
     if not isinstance(revert_data, str) or not revert_data.startswith("0x") or len(revert_data) < 10:
@@ -546,10 +456,7 @@ def _view(contract: Any, function: str, arguments: tuple[Any, ...]) -> Any:
 
 @contextmanager
 def _rpc_errors() -> Iterator[None]:
-    """Turn node, transport and web3 failures into ChainUnavailable, TransactionRejected or
-    TransactionPending. Any other exception (a KeyError, a TypeError, an ABI function that does not
-    exist) is a bug in the calling code, not the node, and goes up unchanged.
-    """
+    """Turn node and web3 failures into our exceptions. Anything else is a bug and passes through."""
     try:
         yield
     except MODEL_ERRORS:
@@ -562,10 +469,8 @@ def _rpc_errors() -> Iterator[None]:
 
 
 def _mapped(error: Exception) -> Exception | None:
-    """The model exception for one web3, transport or decoding failure, or None when error is none of
-    those. Messages carry no details.
-    """
-    # requests' ConnectionError and Timeout are OSErrors, like a refused or reset socket
+    """Our exception for a web3 or transport error, or None if it is not one."""
+    # connection errors and timeouts are OSErrors
     if isinstance(error, (OSError, json.JSONDecodeError)):
         return ChainUnavailable("RPC request failed")
     try:
@@ -587,7 +492,6 @@ def _mapped(error: Exception) -> Exception | None:
         if revert is not None:
             return TransactionRejected(revert)
         return ChainUnavailable("RPC request failed")
-    # BadFunctionCallOutput: no contract, or another one, answers at the address
     node_errors = (
         BadFunctionCallOutput, BadResponseFormat, CannotHandleRequest, MultipleFailedRequests,
         ProviderConnectionError, TooManyRequests,
@@ -598,8 +502,8 @@ def _mapped(error: Exception) -> Exception | None:
 
 
 def _rpc_revert_name(error: Any) -> str | None:
-    # Hardhat 3 mines a transaction that reverts at send time and answers eth_sendTransaction with
-    # {"code": 3, "message": "...reverted with custom error 'ZeroHash()'", "data": "0xf1ae58d5"}
+    # Hardhat 3 reports a revert at send time like this:
+    # {"code": 3, "message": "...custom error 'ZeroHash()'", "data": "0xf1ae58d5"}
     response = getattr(error, "rpc_response", None)
     details = response.get("error") if isinstance(response, dict) else None
     if not isinstance(details, dict):
@@ -614,7 +518,6 @@ def _learn_errors(abi: list[Any]) -> None:
     try:
         from web3 import Web3
     except ImportError:
-        # nothing can revert without web3 anyway
         return
 
     for entry in abi:
@@ -628,7 +531,7 @@ def _learn_errors(abi: list[Any]) -> None:
 
 
 def _abi_type(item: dict[str, Any]) -> str:
-    # canonical type for a selector: tuples are spelled out, array suffixes kept
+    # tuples have to be spelled out to get the right selector
     kind = item["type"]
     if kind.startswith("tuple"):
         return f"({','.join(_abi_type(component) for component in item['components'])}){kind[len('tuple'):]}"
@@ -644,12 +547,11 @@ def _load_default_errors() -> None:
         try:
             read_artifact(name)
         except DeploymentUnavailable:
-            # without that artifact its errors just stay "Reverted"
             continue
 
 
 def _deploy_block(value: Any) -> tuple[int, str]:
-    """(number, lowercase hash) from deployment.json's deploy_block; anything else is a ValueError."""
+    """Number and hash from deployment.json's deploy_block."""
     number, recorded = value["number"], value["hash"]
     if isinstance(number, bool) or not isinstance(number, int) or number < 0:
         raise ValueError("invalid deploy block number")
@@ -660,7 +562,7 @@ def _deploy_block(value: Any) -> tuple[int, str]:
 
 
 def _address(value: Any) -> str:
-    """Checksum an address given in any case; anything that is not an address is a caller mistake."""
+    """Checksum an address; anything else is a ValueError."""
     from web3 import Web3
 
     if not isinstance(value, str):
@@ -672,14 +574,14 @@ def _address(value: Any) -> str:
 
 
 def _scope(value: Any) -> int:
-    # any uint8 goes to the contract, which decides what is supported
+    # the contract decides which scopes are supported
     if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 255:
         raise ValueError("scope must be a whole number from 0 to 255")
     return int(value)
 
 
 def _duration(value: Any) -> int:
-    # any uint16 goes to the contract, which enforces 1-365 days
+    # the contract enforces 1-365 days
     if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 65535:
         raise ValueError("duration must be a whole number of days from 0 to 65535")
     return int(value)

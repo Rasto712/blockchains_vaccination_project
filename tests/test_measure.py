@@ -1,10 +1,6 @@
 # AI assistance: parts of this file were written with Claude (Anthropic) and thoroughly reviewed.
-"""Offline tests for evaluation/measure.py. No node: the scenario runs against the fake chain with the
-deploy steps and web3-only helpers mocked, and the table and CSV code gets hand-made samples. The real
-request path (_request through app.chain with a mocked contract), the reward check and the warm-up are
-tested on their own. Only the event-decoding and request tests need web3; they are skipped when it is not
-installed. Files go to temporary folders. The real measured tables come from python -m evaluation.measure
-on a node.
+"""Offline tests for evaluation/measure.py, using the fake chain and mocks.
+Only the event and request tests need web3.
 """
 import contextlib
 import csv
@@ -56,9 +52,7 @@ def sample(gas, status="ok", count=1, scenario="s", role="requester", function="
 
 
 class ScenarioChain(FakeChain):
-    """FakeChain with positive gas, receipts kept by hash, the rewards each grant minted, and a reset for
-    the fresh contracts of every run.
-    """
+    """FakeChain with gas, receipts and reward tracking, and a reset for each run."""
 
     def __init__(self, settings):
         super().__init__(settings)
@@ -653,7 +647,7 @@ class MainTests(MeasureTestCase):
 
 @unittest.skipIf(Web3 is None, "web3 is not installed")
 class EventTests(unittest.TestCase):
-    """_logs_of, _one_event and _grant_events decode real log bytes with web3, as on the node."""
+    """Event helpers decode real log bytes with web3."""
     MANAGER = "0x5FbDB2315678afecb367f032d93F642f64180aa3"
     TOKEN = "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512"
     GUARDIAN = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
@@ -721,7 +715,7 @@ def receipt_with(*logs):
 
 @unittest.skipIf(Web3 is None, "web3 is not installed")
 class RequestTests(unittest.TestCase):
-    """The real measure._request: requestAccess through app.chain, the receipt, then the decoded event."""
+    """The real measure._request with a mocked contract."""
     GUARDIAN = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
     SCHOOL = "0x90F79bf6EB2c4f870365E785982E1f101E93b906"
 
@@ -767,7 +761,7 @@ class RequestTests(unittest.TestCase):
 
 
 class RewardCheckTests(unittest.TestCase):
-    """_check_rewards after a run: one unit per requester, all to the guardian, every tuple marked rewarded."""
+    """_check_rewards after a run."""
     REQUESTERS = ["requester 1", "requester 2"]
 
     def check(self, guardian=2, supply=2, requester_balance=0, rewarded=True):

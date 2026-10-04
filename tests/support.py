@@ -1,6 +1,5 @@
 # AI assistance: parts of this file were written with Claude (Anthropic) and thoroughly reviewed.
-"""Shared test set-up: a temporary runtime folder with settings that point into it.
-"""
+"""Shared test setup: a temporary runtime folder with settings that point into it."""
 import tempfile
 from pathlib import Path
 from unittest import mock
@@ -9,7 +8,7 @@ from app import records
 
 
 def temp_runtime(test):
-    """Make a temporary folder, point DATA_ROOT and every path setting into it, and clean up after the test."""
+    """Make a temp folder, point the settings into it and clean up after the test."""
     folder = tempfile.TemporaryDirectory()
     test.addCleanup(folder.cleanup)
     root = Path(folder.name).resolve()

@@ -1,16 +1,14 @@
 /* AI assistance: parts of this file were written with Claude (Anthropic) and thoroughly reviewed. */
-/* The page: it polls /api/state and reads the contract views from the node with Viem (chain.js), draws the
-   top bar, the setup checklist, the acting role's view and the audit timeline, and runs one action at a time.
-   Register, attest, grant and revoke go to the node with Viem; school and doctor requests, setup, deploy and
-   the guided demo are JSON POSTs to the server. Everything that comes from the server or the node is inserted
-   as text, never as HTML. Demo mode: each action is sent from the chosen role's local Hardhat account. */
+/* Main page code: polls /api/state, draws the views and runs one action at a time.
+   Register, attest, grant and revoke go to the node with Viem (chain.js); the other actions are POSTs to the
+   server. Server and node data is always inserted as text, never as HTML. */
 'use strict';
 
 const POLL_MS = 2000;
-// above the server's 10 s RPC timeout, so a stalled node is reported as the node, not as this server
+// longer than the server's 10 s RPC timeout, so a stalled node is blamed on the node
 const POLL_TIMEOUT_MS = 15000;
 const ROLE_KEY = 'vaccination-card-role';
-// one action at a time in every tab of this origin: the page's own transactions do not pass the server's lock
+// one action at a time across all tabs (the page's own transactions skip the server's lock)
 const ACTION_LOCK = 'vaccination-card-action';
 const ROLES = ['deployer', 'clinic', 'guardian', 'school', 'doctor'];
 const ROLE_NOTES = {
@@ -34,8 +32,8 @@ const ui = {
   role: readRole(),
   snapshot: null,
   serverMessage: 'connecting to the UI server…',
-  record: null, // the guardian's card, only while the guardian's view is open
-  recordFor: null, // local.ready when the card was fetched
+  record: null, // the guardian's card, only loaded in the guardian view
+  recordFor: null, // local.ready value when the card was fetched
   recordLoading: false,
   outcomes: {}, // action key -> last result
   pending: {}, // action key -> true while its request runs
@@ -43,16 +41,16 @@ const ui = {
   actionSeq: 0,
   shown: {}, // section -> signature of what it shows
   pollTimer: 0,
-  deploymentKey: null, // the contract addresses the outcomes on screen belong to
-  highlight: { keys: [], txs: [] }, // the outcome cards and audit rows of the last guided step
-  refocus: null, // the control that sent the running action, focused again once it is enabled
-  queue: Promise.resolve(), // the running action, where the browser has no Web Locks
+  deploymentKey: null, // contract addresses the shown outcomes belong to
+  highlight: { keys: [], txs: [] }, // outcome cards and audit rows of the last demo step
+  refocus: null, // control to focus again after the action finishes
+  queue: Promise.resolve(), // running action, used when the browser has no Web Locks
 };
 
 /* ---------- helpers ---------- */
 
 function readRole() {
-  // a link such as /#school opens that role; otherwise the last one used
+  // /#school opens that role, otherwise use the last one
   const linked = window.location.hash.slice(1);
   if (ROLES.includes(linked)) return linked;
   try {
@@ -67,7 +65,7 @@ function saveRole(role) {
   try {
     localStorage.setItem(ROLE_KEY, role);
   } catch (error) {
-    // private window or blocked storage: the role just is not remembered
+    // storage blocked: the role is just not remembered
   }
 }
 
@@ -149,12 +147,12 @@ async function poll() {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), POLL_TIMEOUT_MS);
   try {
-    // the server leaves out the contract views: chain.js reads them from the node with Viem
+    // chain_views=0: chain.js reads the contract views itself
     const response = await fetch('/api/state?chain_views=0', { cache: 'no-store', signal: controller.signal });
     const data = await response.json();
     const usable = response.ok && data && data.roles;
     const current = usable ? await addChainViews(data) : true;
-    // a snapshot that started before the last action finished is older than what the page shows
+    // ignore a snapshot that started before the last action finished
     if (seq === ui.actionSeq && current) {
       if (usable) {
         forgetOtherDeployments(data);
@@ -179,8 +177,8 @@ async function poll() {
 }
 
 function forgetOtherDeployments(snapshot) {
-  // results from earlier contracts would contradict the fresh ones (a deploy here, or deploy_local --reset);
-  // the deploy block tells two deployments apart even at the same addresses
+  // results from old contracts would contradict new ones (after a redeploy or reset);
+  // the deploy block tells deployments apart even at the same addresses
   if (!snapshot.deployment.deployed) return;
   const key = JSON.stringify([snapshot.deployment.contracts, snapshot.deployment.deploy_block]);
   if (ui.deploymentKey !== null && ui.deploymentKey !== key) {
@@ -197,7 +195,7 @@ function schedulePoll() {
 }
 
 function act(key, path, body, confirmText) {
-  // one POST to the server, which runs it under its action lock
+  // POST to the server
   return run(key, () => api('POST', path, body || {}), confirmText);
 }
 
@@ -209,14 +207,14 @@ function oneAtATime(task) {
 }
 
 async function run(key, send, confirmText) {
-  // one action, sent by send() (a POST, or a Viem call from chain.js), with its pending state and outcome
+  // runs one action (POST or Viem call) and tracks its pending state and outcome
   if (ui.pending[key]) return null;
   if (confirmText && !window.confirm(confirmText)) return null;
-  // the button is disabled while its request runs, which drops keyboard focus; show() gives it back afterwards
+  // a disabled button loses focus, so remember it; show() gives focus back
   ui.refocus = document.activeElement && document.activeElement.getAttribute('data-focus');
   ui.pending[key] = true;
   delete ui.outcomes[key];
-  // a click of its own ends the highlight of the last guided step
+  // clicking something else clears the demo highlight
   if (key !== 'demo') ui.highlight = { keys: [], txs: [] };
   render();
   let outcome;
@@ -226,12 +224,12 @@ async function run(key, send, confirmText) {
     outcome = { status: 'failed', message: 'the UI server did not answer', reason: '', tx: '', fields: {}, details: {} };
   }
   ui.pending[key] = false;
-  // the time of the answer, so an older result is not mistaken for the current state
+  // time of the answer, so an old result is not mistaken for the current one
   outcome.at = new Date().toLocaleTimeString();
   ui.outcomes[key] = outcome;
   ui.actionSeq += 1;
   render();
-  // a control that is gone after the answer does not take focus later
+  // do not refocus a control that is gone
   ui.refocus = null;
   poll();
   return outcome;
@@ -248,7 +246,7 @@ async function fetchRecord() {
     record = { status: 'failed', message: 'the UI server did not answer' };
   }
   ui.recordLoading = false;
-  // the role may have changed while the request ran; only the guardian's view keeps the card
+  // the role may have changed meanwhile; only the guardian view keeps the card
   ui.record = ui.role === 'guardian' ? record : null;
   render();
 }
@@ -270,11 +268,11 @@ function render() {
   show('roles', { role: ui.role }, renderRoles);
   show('acting', { role: ui.role, accounts: s && s.accounts }, renderActing);
   show('node-status', { s: s && [s.node, s.deployment], m: ui.serverMessage }, renderNodeStatus);
-  // only what each section draws, so an unrelated change (a new audit row, node time) does not rebuild it
+  // only data a section draws, so unrelated changes do not rebuild it
   const parts = s && [s.node.reachable, s.node.message, s.node.chain_id, s.deployment, s.local, s.accounts,
     s.registrations, s.record, s.consents, s.rewards];
   const common = { parts, stale: Boolean(ui.serverMessage), outcomes: ui.outcomes, pending: ui.pending, highlight: ui.highlight };
-  // demo.js adds the guided demo panel and its toggle
+  // demo.js adds the demo panel
   if (typeof renderDemo === 'function') {
     show('demo-toggle', { open: ui.demoOpen }, renderDemoToggle);
     show('demo', { ...common, open: ui.demoOpen, demo: s && s.demo, choice: ui.expireChoice, step: ui.lastStep }, renderDemo);
@@ -286,17 +284,17 @@ function render() {
 }
 
 function show(id, data, build) {
-  // rebuild a section only when what it shows changed, so typing and focus survive the 2-second poll
+  // rebuild only if the data changed, so typing and focus survive the poll
   const signature = JSON.stringify(data);
   if (ui.shown[id] === signature) return;
   ui.shown[id] = signature;
   const host = document.getElementById(id);
-  // keep keyboard focus (and the caret in a days field) on the same control across the rebuild
+  // keep focus (and the caret in the days field) across the rebuild
   const active = host.contains(document.activeElement) ? document.activeElement : null;
   const focusKey = active && active.getAttribute('data-focus');
   const caret = active && active.tagName === 'INPUT' ? [active.selectionStart, active.selectionEnd] : null;
   host.replaceChildren(...[build()].flat(Infinity).filter(Boolean));
-  // the focused control, or else the one an action asked for (it may have been disabled, or replaced)
+  // the focused control, or the one an action asked for
   const find = (key) => key && [...host.querySelectorAll('[data-focus]')].find((node) => node.getAttribute('data-focus') === key && !node.disabled);
   let again = find(focusKey);
   if (!again && ui.refocus) {
@@ -309,7 +307,7 @@ function show(id, data, build) {
       try {
         again.setSelectionRange(caret[0], caret[1]);
       } catch (error) {
-        // number fields have no selection in some browsers
+        // some browsers do not support selection on number fields
       }
     }
   }
@@ -350,9 +348,9 @@ function outcomeCard(key, options) {
 }
 
 function resultCard(result, access, highlighted) {
-  // one action's answer: status, reason, message and tx hash, and for a school or doctor request what it released
+  // shows one action's result
   const tone = TONES[result.status] || 'warn';
-  // the denial text names the transaction; it is shown on its own line below
+  // the transaction hash is shown on its own line below
   const message = (result.message || '').replace(/ \(logged on-chain in 0x[0-9a-fA-F]+\)$/, '');
   const details = result.details || {};
   return el('div', { class: `outcome ${tone}${highlighted ? ' highlight' : ''}`, role: 'status' },
@@ -487,7 +485,7 @@ function attestCard(s) {
       ['local commitment', s.local.commitment ? hash(s.local.commitment) : el('span', { class: 'muted', text: s.local.message || '—' })],
       ['attested on-chain', record ? yesNo(record.attested) : el('span', { class: 'muted', text: '—' })],
     ]),
-    // one outcome per role, so one role's result never shows up in another role's card
+    // one outcome per role so results do not leak into another role's card
     button(`Attest as ${role}`, `attest:${role}`, () => run(`attest:${role}`, () => viemAttest(role))),
     outcomeCard(`attest:${ui.role}`));
 }
@@ -646,7 +644,7 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden) clearTimeout(ui.pollTimer);
   else poll();
 });
-// deferred scripts (vendor/viem.js, chain.js, this one, then demo.js) have all run before DOMContentLoaded
+// deferred scripts have all run before DOMContentLoaded
 document.addEventListener('DOMContentLoaded', () => {
   render();
   poll();

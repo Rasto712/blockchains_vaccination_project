@@ -1,7 +1,6 @@
 /* AI assistance: parts of this file were written with Claude (Anthropic) and thoroughly reviewed. */
-/* The guided demo panel and the demo controls (tamper, jump to expiry). Loaded after app.js, whose helpers
-   (el, button, badge, act, render, resultCard, outcomeCard, ...) it uses. The server runs and checks every
-   step (ui/demo.py); this file only shows them, switches to each step's role and highlights its result. */
+/* The guided demo panel and demo controls. Uses helpers from app.js. The server runs the steps (ui/demo.py);
+   this file just shows them. */
 'use strict';
 
 const DEMO_OPEN_KEY = 'vaccination-card-demo-open';
@@ -12,7 +11,7 @@ const EXPIRE_WARNING = 'Jump to the expiry of this consent? Node time only moves
 
 ui.demoOpen = readDemoOpen();
 ui.expireChoice = '';
-ui.lastStep = null; // the step whose results the panel shows in full
+ui.lastStep = null; // step whose results are shown in full
 
 function readDemoOpen() {
   try {
@@ -27,7 +26,7 @@ function toggleDemo() {
   try {
     localStorage.setItem(DEMO_OPEN_KEY, ui.demoOpen ? 'open' : 'closed');
   } catch (error) {
-    // not remembered
+    // could not remember it
   }
   render();
 }
@@ -43,8 +42,7 @@ async function runStep(path, confirmText, body) {
   const outcome = await act('demo', path, body || {}, confirmText);
   const entry = outcome && outcome.details && outcome.details.step;
   if (!entry) return;
-  // the answer is newer than the snapshot on screen: take its step in at once, so the Next button never
-  // names a step that has already run while the next poll is on its way
+  // use the new step right away so the Next button never shows a step that already ran
   const d = ui.snapshot && ui.snapshot.demo;
   if (d) {
     if (entry.step === 0) {
@@ -59,7 +57,7 @@ async function runStep(path, confirmText, body) {
       d.stale = false;
     }
   }
-  // show each action of the step in its role's own card as well, and mark it and its audit rows
+  // also show each action in its role's card and mark its audit rows
   const keys = [];
   for (const item of entry.results) {
     if (item.key) {
@@ -72,7 +70,7 @@ async function runStep(path, confirmText, body) {
     txs: entry.results.filter((item) => item.logged && item.result.tx).map((item) => item.result.tx.toLowerCase()),
   };
   ui.lastStep = entry.step;
-  // keyboard focus goes to the button a presenter presses next
+  // focus the button the presenter presses next
   ui.refocus = d && d.finished ? 'demo-start' : 'demo-next';
   if (entry.role !== ui.role) switchRole(entry.role);
   else render();
@@ -152,7 +150,7 @@ function stepDetail(entry, d, current) {
 
 function summaryBox(summary, d) {
   if (!('audit_ok' in summary)) {
-    // the final check could not run (the node stopped, say): it can run again
+    // the check could not run (e.g. node stopped), so it can be run again
     return el('div', { class: 'outcome warn', role: 'status' },
       el('div', { class: 'outcome-head' }, badge('could not check', 'warn')),
       el('p', { class: 'message', text: summary.message }),

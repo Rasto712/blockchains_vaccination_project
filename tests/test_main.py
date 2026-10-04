@@ -1,8 +1,5 @@
 # AI assistance: parts of this file were written with Claude (Anthropic) and thoroughly reviewed.
-"""Tests for the console in app/main.py: input checks, setup, local hashes and error display, plus the
-grant, rewards, audit and attest actions against the fake chain.
-The menu's chain actions are also checked by running it against the real node.
-"""
+"""Tests for the console in app/main.py, using the fake chain."""
 import contextlib
 import io
 import json

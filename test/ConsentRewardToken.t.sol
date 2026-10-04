@@ -7,18 +7,11 @@ import {ConsentRewardToken} from "../contracts/ConsentRewardToken.sol";
 import {IdentityRegistry} from "../contracts/IdentityRegistry.sol";
 import {ConsentManager} from "../contracts/ConsentManager.sol";
 
-/// @dev Stand-in contract with deployed code, so setMinterOnce's code-length check can be exercised in isolation.
+// Dummy contract so the code-length check in setMinterOnce can be tested.
 contract DummyContract {}
 
-/**
- * @title ConsentRewardTokenTest
- * @notice Solidity unit tests for ConsentRewardToken (run with `npm test`, Hardhat 3 + forge-std).
- * @dev Test IDs SOL-RT-01..07 are stable; evaluation/results/solidity_test_results.csv
- *      (written by evaluation/export_solidity_results.py) cites them.
- *      The token is deployed from a separate `deployer` wallet so "deployer" and "minter" are distinct actors.
- *      In RT-02..04 this test contract plays the minter (it is a contract, like ConsentManager); RT-05 uses the
- *      real IdentityRegistry and ConsentManager.
- */
+/// Tests for ConsentRewardToken. Test IDs (SOL-RT-xx) are used by the results export.
+/// The token is deployed from a separate deployer wallet so deployer and minter are different.
 contract ConsentRewardTokenTest is Test {
     ConsentRewardToken internal token;
 
@@ -30,20 +23,20 @@ contract ConsentRewardTokenTest is Test {
     event MinterConfigured(address indexed minter);
     event RewardMinted(address indexed recipient, uint256 amount);
 
-    /// @notice Deploy a fresh token from the deployer wallet before every test.
+    // Fresh token before every test.
     function setUp() public {
         vm.prank(deployer);
         token = new ConsentRewardToken();
     }
 
-    /// @dev Make this test contract the minter (stand-in for ConsentManager).
+    // Makes this test contract the minter (instead of ConsentManager).
     function _configureSelfAsMinter() internal {
         vm.prank(deployer);
         token.setMinterOnce(address(this));
     }
 
-    /// @notice [SOL-RT-01] Reject a wrong caller (also one whose tx.origin is the deployer), zero and non-contract minters, and a second configuration, in the order NotDeployer, MinterAlreadySet, ZeroAddress, NotAContract; the deployer configures exactly once.
-    /// @dev Why it matters: whoever is minter controls all rewards, so setup must be a one-shot deployer action that points at a contract, never at a person. Only msg.sender counts: a tx.origin check would let any contract the deployer's wallet calls choose the minter.
+    /// @notice [SOL-RT-01] Only the deployer can set the minter, once, and it must be a contract (errors checked in order).
+    /// @dev Why it matters: Whoever is the minter controls all rewards.
     /// @custom:requirement Rewards: the minter is set once, by the deployer, to a contract
     function testOnlyDeployerCanConfigureMinterOnce() public {
         DummyContract manager = new DummyContract();
@@ -53,7 +46,7 @@ contract ConsentRewardTokenTest is Test {
         vm.expectRevert(ConsentRewardToken.NotDeployer.selector);
         token.setMinterOnce(address(manager));
 
-        // A call reached from the deployer's own transaction (tx.origin == deployer) through another account.
+        // tx.origin is the deployer but msg.sender is not.
         vm.prank(attacker, deployer);
         vm.expectRevert(ConsentRewardToken.NotDeployer.selector);
         token.setMinterOnce(address(manager));
@@ -97,8 +90,8 @@ contract ConsentRewardTokenTest is Test {
         assertEq(token.minter(), address(manager), "minter unchanged");
     }
 
-    /// @notice [SOL-RT-02] Nobody can mint before setup; afterwards guardian, requester, attacker and even the deployer are rejected; only the configured minter succeeds.
-    /// @dev Why it matters: if anyone but ConsentManager could mint, rewards would no longer prove a real consent grant.
+    /// @notice [SOL-RT-02] Nobody can mint before setup, and afterwards only the minter can.
+    /// @dev Why it matters: Only ConsentManager should be able to mint.
     /// @custom:requirement Rewards: only the configured ConsentManager can mint
     function testOnlyConfiguredManagerCanMint() public {
         // Before configuration the minter is address(0), so every caller fails.
@@ -122,8 +115,8 @@ contract ConsentRewardTokenTest is Test {
         assertEq(token.balanceOf(guardian), 1);
     }
 
-    /// @notice [SOL-RT-03] Each mint adds exactly one unit to the recipient and to total supply and emits RewardMinted(recipient, 1).
-    /// @dev Why it matters: one unit per call with no amount parameter means even the minter cannot inflate a single reward; the menu prints balanceOf as a plain integer.
+    /// @notice [SOL-RT-03] Each mint adds exactly one unit to the balance and total supply and emits RewardMinted.
+    /// @dev Why it matters: One unit per call, so no one can inflate a reward.
     /// @custom:requirement Rewards: exactly one unit per mint
     function testMintAddsOneUnitAndEmitsEvent() public {
         _configureSelfAsMinter();
@@ -142,8 +135,8 @@ contract ConsentRewardTokenTest is Test {
         assertEq(token.totalSupply(), 3, "supply = sum of balances");
     }
 
-    /// @notice [SOL-RT-04] Minting to the zero address is rejected and changes nothing; the minter check comes first, so a non-minter sees NotMinter.
-    /// @dev Why it matters: a reward sent to address(0) would inflate supply with units nobody holds.
+    /// @notice [SOL-RT-04] Minting to the zero address is rejected (a non-minter sees NotMinter first).
+    /// @dev Why it matters: Rewards sent to address(0) would belong to nobody.
     /// @custom:requirement Rewards: no mint to the zero address
     function testRejectZeroRecipient() public {
         _configureSelfAsMinter();
@@ -157,8 +150,8 @@ contract ConsentRewardTokenTest is Test {
         assertEq(token.balanceOf(address(0)), 0);
     }
 
-    /// @notice [SOL-RT-05] A positive balance alone never grants access: a rewarded account without consent is denied, and a guardian's balance survives revocation while access does not.
-    /// @dev Why it matters: the design rule is "consent controls access, tokens are only rewards"; this proves the manager never consults balanceOf.
+    /// @notice [SOL-RT-05] A reward balance never gives access, and it stays after revocation.
+    /// @dev Why it matters: Consent controls access, tokens are only rewards.
     /// @custom:requirement Rewards: a token balance never authorizes access
     function testBalanceDoesNotAuthorizeAccess() public {
         address clinic = makeAddr("clinic");
@@ -204,8 +197,8 @@ contract ConsentRewardTokenTest is Test {
         assertEq(uint8(reason), 6, "Revoked");
     }
 
-    /// @notice [SOL-RT-06] The token exposes no transfer, transferFrom, approve or burn function: calls with those selectors fail.
-    /// @dev Why it matters: reward units must be non-transferable so they cannot be sold or used to buy someone else's standing.
+    /// @notice [SOL-RT-06] The token has no transfer, transferFrom, approve or burn.
+    /// @dev Why it matters: Reward units must not be transferable.
     /// @custom:requirement Rewards: reward units are non-transferable
     function testTokenIsNonTransferable() public {
         _configureSelfAsMinter();
@@ -226,8 +219,8 @@ contract ConsentRewardTokenTest is Test {
         assertEq(token.balanceOf(school), 0);
     }
 
-    /// @notice [SOL-RT-07] The deployer's only power is the one-time setup: it holds no balance and cannot mint or reconfigure afterwards.
-    /// @dev Why it matters: the deployer is an administrator, not a data owner; it must not be able to reward itself or redirect minting later.
+    /// @notice [SOL-RT-07] The deployer can only do the one-time setup, nothing else.
+    /// @dev Why it matters: The deployer must not reward itself or change the minter later.
     /// @custom:requirement Deployment: the deployer has setup authority only
     function testDeployerHasNoOngoingPower() public {
         _configureSelfAsMinter();

@@ -1,26 +1,15 @@
 # AI assistance: parts of this file were written with Claude (Anthropic) and thoroughly reviewed.
-"""The guided demo and the two demo controls of the web UI (ui/server.py). No HTTP here either.
+"""The guided demo and the two demo controls (tamper, jump to expiry) of the web UI. No HTTP here.
 
-The guided demo plays the story of python -m integration.demo_workflow one click per step. Each step runs the
-same functions as the page's buttons (ui/actions.py) and checks its own result the way demo_workflow does,
-so the presenter sees each outcome verified. Step 0 is not in UI_HANDOFF's list: like demo_workflow, it
-deploys fresh contracts first, so the demo can be played again and again. Step 11 copies demo_workflow's
-exact expiry: an empty block at expiresAt - 1, where the checkAccess view still allows (a view logs and
-releases nothing), then the school's request mined at exactly expiresAt, which is already expired. A step
-that does not give the expected result stays the current step, so it can be tried again. A try that failed
-after its transaction went through (the node stopped during a later read, say) is picked up where it
-stopped: an earlier registration, attestation or grant counts, its reward is checked against the balance
-before the first try, and step 11 does not move time twice. After anything done by hand, starting again
-gives fresh contracts. The final check compares the AccessAttempt events of the guided demo's own requests
-with demo_workflow.EXPECTED_AUDIT, and the reward balances with its 2 and 0s; if it cannot run, it can be
-run again. Like demo_workflow, the guided demo runs only on chain 31337, because step 11 moves node time.
+The guided demo plays the story of integration.demo_workflow one click per step, using the same actions as
+the page's buttons and checking each result. Step 0 deploys fresh contracts so the demo can be replayed.
+A step that does not give the expected result stays the current step, so it can be tried again; if a try
+failed after its transaction went through, the next try picks up from there. Like demo_workflow, it only runs
+on chain 31337 because step 11 moves node time.
 
-Tamper follows UI_HANDOFF, not demonstrate_tampering (which prints and raises): a new copy under
-<data_root>/tamper/ with one byte of the batch changed, the doctor's request on that copy (an operator
-setting, never requester input), the copy deleted in a finally, then a check that the original still
-matches the on-chain commitment. The original is never opened for writing. Jump to expiry moves node time
-to a consent's expiresAt with demo_workflow.advance_time(mine=True). It refuses, without touching node time,
-a consent that was never granted, is revoked or has already expired: node time cannot go back.
+Tamper makes a temporary copy of the record with one byte changed, asks as the doctor, deletes the copy and
+checks the original still matches the on-chain commitment. Jump to expiry moves node time to a consent's
+expiry; it refuses if the consent was never granted, is revoked or already expired (time cannot go back).
 """
 import secrets
 import threading
@@ -33,7 +22,7 @@ from ui import actions
 
 GRANT_DAYS = demo_workflow.GRANT_DAYS
 REGRANT_DAYS = demo_workflow.REGRANT_DAYS
-# the batch value demo_workflow changes; one byte differs
+# the batch value demo_workflow tampers with (one byte differs)
 BATCH, TAMPERED_BATCH = b"ABC123-DEMO", b"ABC124-DEMO"
 
 
@@ -41,13 +30,13 @@ class Step(NamedTuple):
     title: str
     role: str  # the role the page switches to afterwards
     expected: str
-    # (demo, settings, settings file, the list its actions are added to) -> (as expected, what it got)
+    # (demo, settings, settings file, list to add actions to) -> (as expected, what it got)
     run: Callable[["GuidedDemo", dict[str, Any], Any, list[dict[str, Any]]], tuple[bool, str]]
 
 
 def tamper(settings: dict[str, Any]) -> dict[str, Any]:
-    """The doctor's request on a tampered copy of the record, which is deleted again. It is denied with
-    HASH_MISMATCH only while the doctor's grant allows access, because the contract compares the hash last.
+    """The doctor's request on a tampered copy of the record (deleted afterwards). It is denied with
+        HASH_MISMATCH only while the doctor's grant is active, because the contract checks the hash last.
     """
     original = records.settings_path(settings, "vaccination_file")
     raw_bytes = records.read_record_bytes(original)
@@ -55,7 +44,7 @@ def tamper(settings: dict[str, Any]) -> dict[str, Any]:
         return actions.result("unavailable", "unavailable: the record has no batch ABC123-DEMO to change")
     folder = records.data_root(settings) / demo_workflow.TAMPER_COPY.parent
     folder.mkdir(parents=True, exist_ok=True)
-    # a new file every time ("x" refuses an existing one), so nothing else is ever overwritten or deleted
+    # always a new file ("x" refuses an existing one), so nothing else gets overwritten or deleted
     copy = folder / f"ui-{secrets.token_hex(8)}.json"
     try:
         with open(copy, "xb") as file:
@@ -72,9 +61,8 @@ def tamper(settings: dict[str, Any]) -> dict[str, Any]:
 
 
 def expire(settings: dict[str, Any], requester: Any, scope: Any) -> dict[str, Any]:
-    """Move node time to the expiry of the guardian's grant to requester for scope, and mine a block there, so
-    the views (and the page) see it expired at once. Refused without any chain write when there is nothing
-    to expire. The time move is permanent and also ends every other grant that expires earlier.
+    """Move node time to the expiry of the guardian's grant and mine a block there, so the page sees it
+        expired. Refused if there is nothing to expire. Time cannot go back, so this also expires every earlier grant.
     """
     requester = actions._requester(settings, requester, "guardian")
     scope = actions._scope(scope)
@@ -96,7 +84,7 @@ def expire(settings: dict[str, Any], requester: Any, scope: Any) -> dict[str, An
     try:
         demo_workflow.advance_time(client, expires_at, mine=True)
     except ValueError as error:
-        # advance_time's own fixed text, e.g. "node time cannot go back"
+        # advance_time's own text, e.g. "node time cannot go back"
         return actions.result("refused", f"refused: {error}")
     return actions.result(
         "ok", f"node time moved to {actions._utc(expires_at)}, the expiry of {requester} {scope.name}; it cannot go back",
@@ -105,8 +93,8 @@ def expire(settings: dict[str, Any], requester: Any, scope: Any) -> dict[str, An
 
 
 class GuidedDemo:
-    """The guided demo's progress: the next step, each step's last try and the requests it logged.
-    Steps run under the server's action lock; this lock only guards reads from GET /api/state.
+    """The guided demo's progress: next step, each step's last try and the requests it logged.
+        Steps run under the server's action lock; this lock only protects reads from GET /api/state.
     """
 
     def __init__(self) -> None:
@@ -119,10 +107,10 @@ class GuidedDemo:
             self.entries: list[dict[str, Any] | None] = [None] * len(STEPS)
             self.transactions: list[str] = []
             self.summary: dict[str, Any] | None = None
-            # what step 0 deployed, to notice contracts replaced since (a node restart, deploy_local --reset)
+            # what step 0 deployed, to notice if the contracts were replaced later
             self.contracts: dict[str, str] = {}
             self.deploy_block = ""
-            # values a step keeps between its tries (the reward balance before a grant)
+            # values a step keeps between tries (e.g. reward balance before a grant)
             self.memo: dict[str, Any] = {}
 
     def progress(self) -> dict[str, Any]:
@@ -148,8 +136,8 @@ class GuidedDemo:
         return self._run(0, settings, settings_path)
 
     def run_next(self, settings: dict[str, Any], settings_path: Any, step: Any = None) -> dict[str, Any]:
-        """Run the current step (again) or, once finished, a final check that could not run. step is the number
-        the page showed on its button; a different one means the page was behind, and nothing is sent.
+        """Run the current step again, or retry the final check if it could not run. step is the number on
+                the page's button; if it differs the page is out of date and nothing is sent.
         """
         if step is not None and (isinstance(step, bool) or not isinstance(step, int)):
             raise actions.InvalidRequest("unknown step")
@@ -169,14 +157,14 @@ class GuidedDemo:
         try:
             ok, got = step.run(self, settings, settings_path, items)
         except Exception as error:
-            # a read after the actions failed (the node stopped, say): the actions stay listed, the step current
+            # a read failed after the actions (e.g. node stopped): keep the actions listed, step stays current
             mapped = actions.error_result(error)
             items.append(_item("check", None, mapped))
             ok, got = False, mapped["message"]
         entry = {"step": number, "title": step.title, "role": step.role, "expected": step.expected,
                  "ok": ok, "got": got, "results": items}
         logged = [item["result"]["tx"] for item in items if item["logged"] and item["result"]["tx"]]
-        # the last step's summary is ready before the page can see the demo as finished
+        # make the summary ready before the page sees the demo as finished
         summary = self._final_check(settings, self.transactions + logged) if ok and number == len(STEPS) - 1 else None
         with self.lock:
             self.entries[number] = entry
@@ -195,7 +183,7 @@ class GuidedDemo:
         return actions.result("ok" if summary["ok"] else "mismatch", f"final check: {summary['message']}", summary=summary)
 
     def _final_check(self, settings: dict[str, Any], transactions: list[str]) -> dict[str, Any]:
-        # this run against demo_workflow's recorded story; only the guided demo's own requests count
+        # compare with demo_workflow's expected story; only the demo's own requests count
         try:
             client, accounts, contracts = demo_workflow._session(settings)
             ours = {transaction.lower() for transaction in transactions}
@@ -213,7 +201,7 @@ class GuidedDemo:
                 for label, address in accounts.items()
             }
         except Exception as error:
-            # no audit_ok: the check did not run, so it can be run again
+            # no audit_ok because the check did not run, so it can be retried
             return {"ok": False, "message": f"the final check could not run: {actions.error_result(error)['message']}"}
         audit_ok = observed == demo_workflow.EXPECTED_AUDIT
         rewards_ok = balances == {label: 2 if label == "guardian" else 0 for label in balances}
@@ -227,12 +215,12 @@ class GuidedDemo:
 
 
 def _item(label: str, key: str | None, result: dict[str, Any], logged: bool = False) -> dict[str, Any]:
-    # one action inside a step; key is the page's outcome card it also fills; logged marks an access request
+    # one action in a step; key is the outcome card it fills; logged marks an access request
     return {"label": label, "key": key, "result": result, "logged": logged}
 
 
 def _said(result: dict[str, Any]) -> str:
-    # what an answer said, for the "got" text
+    # text for "got"
     text = f"{result['status']} {result['reason']}".strip()
     if result["fields"]:
         text += f" {result['fields']}"
@@ -250,7 +238,7 @@ def _matching(value: bool | None) -> str:
 
 def _prepare(demo: GuidedDemo, settings: dict[str, Any], settings_path: Any, items: list[dict[str, Any]]) -> Any:
     if settings["expected_chain_id"] != demo_workflow.LOCAL_CHAIN_ID:
-        # as demo_workflow: step 11 moves node time, so refuse before deploying anything
+        # like demo_workflow: step 11 moves node time, so refuse before deploying
         refused = actions.result("refused", "refused: the guided demo moves node time, so it only runs on the local Hardhat chain 31337")
         items.append(_item("deployer deploys fresh contracts", "deploy", refused))
         return False, refused["message"]
@@ -271,7 +259,7 @@ def _register(demo: GuidedDemo, settings: dict[str, Any], settings_path: Any, it
     for label in records.REGISTERING_LABELS:
         answers.append(actions.perform(actions.register, settings, label))
         items.append(_item(f"{label} registers", f"register:{label}", answers[-1]))
-    # AlreadyRegistered: an earlier try of this step got that far; the on-chain hash below decides
+    # AlreadyRegistered means an earlier try got this far; the on-chain hash below decides
     earlier = [answer for answer in answers if answer["message"] == "rejected: AlreadyRegistered"]
     failed = [answer["message"] for answer in answers if answer["status"] != "ok" and answer not in earlier]
     if failed:
@@ -291,7 +279,7 @@ def _attest(demo: GuidedDemo, settings: dict[str, Any], settings_path: Any, item
     items.append(_item("the guardian tries to attest its own record", "attest:guardian", wrong))
     right = actions.perform(actions.attest, settings, "clinic")
     items.append(_item("the clinic attests the guardian's record", "attest:clinic", right))
-    # EvidenceAlreadyRegistered: an earlier try attested already; the on-chain commitment decides
+    # EvidenceAlreadyRegistered means an earlier try already attested; the on-chain commitment decides
     attested = right["status"] == "ok" or right["message"] == "rejected: EvidenceAlreadyRegistered"
     matches = _original_matches(settings) if attested else None
     clinic = "ok" if right["status"] == "ok" else right["message"]
@@ -311,7 +299,7 @@ def _grant_step(requester: str, scope: Scope, days: int, reward: int) -> Callabl
         if answer["status"] == "ok":
             after, note = answer["details"]["reward_after"], ""
         elif retry and answer["message"] == "rejected: ConsentStillActive":
-            # the grant of an earlier try went through; its reward is checked from the balance before that try
+            # an earlier try's grant went through; check the reward against the balance from before it
             after, note = _guardian_balance(settings), " (granted by an earlier try)"
         else:
             return False, answer["message"]
@@ -341,7 +329,7 @@ def _tamper(demo: GuidedDemo, settings: dict[str, Any], settings_path: Any, item
 
 
 def _revoke(demo: GuidedDemo, settings: dict[str, Any], settings_path: Any, items: list[dict[str, Any]]) -> Any:
-    # a revoke of a revoked grant changes nothing, so a second try is safe
+    # revoking twice changes nothing, so retrying is safe
     revoked = actions.perform(actions.revoke, settings, "guardian", "school", Scope.MEASLES_STATUS.name)
     items.append(_item("guardian revokes the school", "consent", revoked))
     if revoked["status"] != "ok":
@@ -352,7 +340,7 @@ def _revoke(demo: GuidedDemo, settings: dict[str, Any], settings_path: Any, item
 
 
 def _expiry(demo: GuidedDemo, settings: dict[str, Any], settings_path: Any, items: list[dict[str, Any]]) -> Any:
-    # demo_workflow.demonstrate_revocation_and_expiry's exact-expiry part, with the page's actions
+    # the exact-expiry part of demo_workflow.demonstrate_revocation_and_expiry, using the page's actions
     client, accounts, contracts = demo_workflow._session(settings)
     manager, guardian, school = contracts["ConsentManager"], accounts["guardian"], accounts["school"]
     consent = chain.get_consent(manager, owner=guardian, requester=school, scope=Scope.MEASLES_STATUS)
@@ -371,7 +359,7 @@ def _expiry(demo: GuidedDemo, settings: dict[str, Any], settings_path: Any, item
         demo_workflow.advance_time(client, expires_at - 1, mine=True)
         items.append(_item("node", None, actions.result("ok", f"empty block mined at expiresAt - 1 ({actions._utc(expires_at - 1)})")))
     else:
-        # an earlier try of this step mined it already
+        # an earlier try already mined it
         items.append(_item("node", None, actions.result("ok", f"the block at expiresAt - 1 ({actions._utc(expires_at - 1)}) is already mined")))
     decision = chain.check_access(manager, owner=guardian, requester=school, scope=Scope.MEASLES_STATUS)
     view = Reason(decision["reason"]).name
@@ -395,7 +383,7 @@ def _expiry(demo: GuidedDemo, settings: dict[str, Any], settings_path: Any, item
 
 
 def _schedule(settings: dict[str, Any]) -> dict[str, Any]:
-    # built from the card here, not with disclosure's projection, so the check is independent (as in demo_workflow)
+    # built from the card directly, not disclosure's projection, so the check is independent
     card = main.record_snapshot(settings)["card"]
     return {"vaccinations": [{"vaccine": event["vaccine"], "date": event["date"]} for event in card["vaccinations"]]}
 
@@ -406,8 +394,7 @@ def _guardian_balance(settings: dict[str, Any]) -> int:
 
 
 def _original_matches(settings: dict[str, Any]) -> bool | None:
-    # the local record's commitment against the one registered for the guardian; None when nothing is
-    # attested yet or either side cannot be read
+    # compare local commitment with the registered one; None if not attested yet or unreadable
     try:
         commitment = main.record_snapshot(settings)["commitment"]
         client = chain.connect(settings)

@@ -1,9 +1,5 @@
-/**
- * Minimal Hardhat 3 configuration, not application business logic.
- * Solidity tests live under test/; Hardhat 3 runs them natively and cheatcodes come from forge-std (devDependency).
- * Pinned to Hardhat 3.18.0 in package.json; change both together. Do not mix Hardhat 2 config.
- * Compiler version matches all .sol pragmas. No public network or signing secrets.
- */
+// Hardhat 3 config. Solidity tests are in test/. Version is pinned in package.json, so change both together.
+// The compiler version matches the .sol pragmas. Only a local network, no secrets.
 import { defineConfig } from "hardhat/config";
 
 export default defineConfig({

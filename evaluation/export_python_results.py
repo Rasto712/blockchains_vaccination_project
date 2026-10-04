@@ -1,35 +1,30 @@
 # AI assistance: parts of this file were written with Claude (Anthropic) and thoroughly reviewed.
-"""Run the Python checks on a live local node and export the REAL results as the PY rows.
+"""Run the Python checks on a live local node and export the real results as the PY rows.
 
 Usage, from the project root, after npm run compile and with npm run node running:
 
     .venv/bin/python -m evaluation.export_python_results [--settings PATH] [--output PATH]
 
 It writes evaluation/results/test_results.csv with the shared header
-(test_id, requirement, why_critical, expected, actual, status, evidence). It writes only the PY rows; the SOL
-rows are in solidity_test_results.csv (python -m evaluation.export_solidity_results). requirement,
-why_critical and expected are the fixed text in ROWS, while actual and status come only from this run.
-A row is "pass" when every observation in it was as expected and "fail" otherwise; an observation that
-was not as expected is marked "(not as expected)" in actual.
+(test_id, requirement, why_critical, expected, actual, status, evidence). Only the PY rows are written; the
+SOL rows come from evaluation.export_solidity_results. requirement, why_critical and expected are fixed text
+in ROWS; actual and status come only from this run. A row passes when every observation was as expected.
 
-One run does this, in order, on the node the settings name (chain 31337 only: it moves node time forward):
-1. the unit tests, with web3 and without it (python -S leaves out the venv's packages); no node needed;
-2. the scripted demo as a subprocess: python -m integration.demo_workflow --settings PATH;
-3. its own story on fresh contracts (deploy_local, as with --reset) through the app code in this process:
-   register, attests from wrong accounts, attest, school and doctor requests, a tampered copy, a missing
-   salt, a late recheck, unsupported scopes, a pending and an unreachable request, rewards and expiry;
-4. failures in the console menu and in the demo (node down, no deployment, rejected transactions, bad
-   local files), with the text they print;
-5. a scan of every transaction mined since step 2 started, the demo's included: calldata, logs and every
-   storage write (debug_traceTransaction) are searched for the record, identity and salt values.
-Two cases cannot happen by themselves under automine, so the run makes them happen and its rows say so:
-the late recheck gets a real revokeConsent mined between the logged request and the recheck, and the
-pending request is sent with automine off and a 3-second receipt timeout (30 s normally).
+The run does this, in order (chain 31337 only, because it moves node time forward):
+1. unit tests, with and without web3; no node needed;
+2. the scripted demo (integration.demo_workflow) as a subprocess;
+3. its own story on fresh contracts through the app code: registration, wrong attestations, school and
+   doctor requests, a tampered copy, a missing salt, a late recheck, unsupported scopes, a pending and an
+   unreachable request, rewards and expiry;
+4. failure cases (node down, no deployment, rejected transactions, bad local files) and the text they print;
+5. a scan of every transaction mined since step 2: calldata, logs and storage writes are searched for the
+   record, identity and salt values.
+Two cases cannot happen by themselves under automine, so the run forces them: a real revokeConsent between
+the logged request and the recheck, and a pending request sent with automine off and a 3-second timeout.
 
-Every local file stays under the settings' data_root: the tamper copy and the temporary files for the
-failure cases are made there and deleted again. When the run cannot finish (settings unreadable, node
-unreachable, an unexpected error), nothing is written and the previous CSV is removed, so it cannot be
-mistaken for this run's evidence. Exit status: 0 when the CSV was written and every row passed, 1 otherwise.
+Local files stay under the settings' data_root and are deleted afterwards. If the run cannot finish,
+nothing is written and the previous CSV is removed, so old results are not mistaken for this run.
+Exit status: 0 if the CSV was written and every row passed, 1 otherwise.
 """
 import argparse
 import base64
@@ -67,19 +62,19 @@ COMMAND = "python -m evaluation.export_python_results"
 # a change under these makes the evidence say "+ uncommitted changes"
 CODE_PATHS = ("app", "contracts", "integration", "scripts", "tests", "config", "evaluation/export_python_results.py")
 LOCAL_CHAIN_ID = 31337
-# the only ABI types a call, a constructor or an event may carry: hashes and metadata, never text or bytes
+# the only ABI types allowed: hashes and metadata, never text or bytes
 PLAIN_TYPES = {"address", "bool", "bytes32", "uint8", "uint16", "uint256"}
 PENDING_TIMEOUT_SECONDS = 3
 SUBPROCESS_TIMEOUT_SECONDS = 600
 UNSUPPORTED_SCOPES = (0, 3, 255)
 GRANT_DAYS = 30
 TRACEBACK = "Traceback (most recent call last)"
-# a slash-rooted path with at least one folder, as an exception text or a resolved Path prints it
+# matches an absolute path such as /home/user/x
 ABSOLUTE_PATH = re.compile(r"(?:^|[\s'\"(=:])/[\w.@-]+/")
 UNITTEST_RAN = re.compile(r"^Ran (\d+) tests? in ", re.MULTILINE)
 UNITTEST_RESULT = re.compile(r"^(OK|FAILED)(?: \((.*)\))?\s*$", re.MULTILINE)
 UNIT_TESTS = ["-m", "unittest", "discover", "-s", "tests"]
-# set for the unit-test runs started here, so a test that reaches run_checks cannot start them again
+# set for the unit-test runs started here, so they cannot start themselves again
 NESTED_RUN_VARIABLE = "EXPORT_PYTHON_RESULTS_UNIT_RUN"
 DEMO_PASSED = "demo passed: every outcome above was checked"
 UNAVAILABLE_TEXT = "unavailable: local record could not be verified, not a clinical result"
@@ -204,7 +199,7 @@ class Row:
 
     @property
     def status(self) -> str:
-        # a row with nothing observed was not checked, so it cannot pass
+        # nothing observed means nothing was checked, so it cannot pass
         return "pass" if self.passed and self.observed else "fail"
 
     def cells(self, context: str) -> list[str]:
@@ -214,7 +209,7 @@ class Row:
 
 
 def parse_unittest_output(text: str) -> tuple[int | None, str | None, str]:
-    """(tests run, "OK" or "FAILED", the part in brackets such as "skipped=69") from unittest's summary."""
+    """(tests run, "OK" or "FAILED", the bracket part such as "skipped=69") from unittest's summary."""
     ran = UNITTEST_RAN.search(text)
     results = UNITTEST_RESULT.findall(text)
     result, details = results[-1] if results else (None, "")
@@ -222,12 +217,12 @@ def parse_unittest_output(text: str) -> tuple[int | None, str | None, str]:
 
 
 def encodings(value: bytes) -> set[bytes]:
-    """The forms a value could take on-chain or in console text: raw, hex in either case and base64."""
+    """The forms a value could take on-chain or in console text: raw, hex (either case) and base64."""
     return {value, value.hex().encode(), value.hex().upper().encode(), base64.b64encode(value)}
 
 
 def find_values(blobs: Iterable[bytes], values: list[tuple[str, bytes]]) -> list[str]:
-    """Labels of the values that occur in any blob in any of their encodings. Labels never hold the value."""
+    """Labels of the values found in any blob in any encoding. Labels never contain the value."""
     blobs = list(blobs)
     found = []
     for label, value in values:
@@ -238,7 +233,7 @@ def find_values(blobs: Iterable[bytes], values: list[tuple[str, bytes]]) -> list
 
 
 def leaks(text: str, values: list[tuple[str, bytes]]) -> list[str]:
-    """What console text shows that it never should: a traceback, an absolute path or a private value."""
+    """Things console text must never show: a traceback, an absolute path or a private value."""
     found = []
     if TRACEBACK in text:
         found.append("a traceback")
@@ -249,7 +244,7 @@ def leaks(text: str, values: list[tuple[str, bytes]]) -> list[str]:
 
 def private_values(settings: dict[str, Any]) -> list[tuple[str, bytes]]:
     """Every local value that must never reach the chain or an error line: the record file, its salt and
-    field values, the JSON keys, the tampered batch, and each identity file, its fields and its salt.
+        fields, the tampered batch, and each identity file with its fields and salt.
     """
     snapshot = records.load_snapshot(
         records.settings_path(settings, "vaccination_file"), records.settings_path(settings, "vaccination_salt_file"),
@@ -273,9 +268,9 @@ def private_values(settings: dict[str, Any]) -> list[tuple[str, bytes]]:
 
 
 def classify_word(value: int, local_hashes: set[bytes], addresses: set[int]) -> str:
-    """What one stored 32-byte word is: one of the local hashes, a known address, a number, a packed
-    consent or other. ConsentManager keeps a tuple's Consent in one slot: expiresAt as uint64 in the low
-    8 bytes, then revoked and rewarded as one byte each, so such a word is a number plus two 0/1 bytes.
+    """What one stored 32-byte word is: a local hash, a known address, a number, a packed consent
+        or other. ConsentManager packs a Consent into one slot (expiresAt in the low 8 bytes, then revoked
+        and rewarded as one byte each), so such a word is a number plus two 0/1 bytes.
     """
     if value.to_bytes(32, "big") in local_hashes:
         return "local hash"
@@ -290,7 +285,7 @@ def classify_word(value: int, local_hashes: set[bytes], addresses: set[int]) -> 
 
 
 def storage_writes(trace: dict[str, Any]) -> list[tuple[int, int]]:
-    """(slot, value) of every SSTORE in a debug_traceTransaction struct log; the value is below the slot."""
+    """(slot, value) of every SSTORE in a debug_traceTransaction struct log."""
     writes = []
     for step in trace.get("structLogs", []):
         if step.get("op") == "SSTORE":
@@ -300,7 +295,7 @@ def storage_writes(trace: dict[str, Any]) -> list[tuple[int, int]]:
 
 
 def write_rows(path: Path, rows: list[list[str]]) -> None:
-    """Write the shared header and the rows, LF line endings."""
+    """Write the shared header and the rows with LF line endings."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", newline="", encoding="utf-8") as file:
         writer = csv.writer(file, lineterminator="\n")
@@ -309,7 +304,7 @@ def write_rows(path: Path, rows: list[list[str]]) -> None:
 
 
 def git_revision() -> str:
-    """Short commit, with "+ uncommitted changes" when the Python or contract sources differ from it."""
+    """Short commit, with "+ uncommitted changes" if the sources differ from it."""
     try:
         sha = _git("rev-parse", "--short", "HEAD")
         dirty = _git("status", "--porcelain", "--", *CODE_PATHS)
@@ -321,7 +316,7 @@ def git_revision() -> str:
 
 
 class LiveRun:
-    """One run on the node: the rows, the settings, and the live session of the in-process story."""
+    """One run on the node: the rows, the settings and the live session of the in-process story."""
 
     def __init__(self, settings_path: Path, settings: dict[str, Any]):
         self.settings_path = settings_path
@@ -551,7 +546,7 @@ class LiveRun:
         revokes = []
 
         def revoke_then_check(manager: Any, owner: str, requester: str, scope: Scope) -> Any:
-            # the consent really ends on-chain after the logged request and before the recheck
+            # really revoke the consent on-chain between the request and the recheck
             if not revokes:
                 revokes.append(chain.revoke_consent(manager, guardian=owner, requester=requester, scope=scope))
             return real_check(manager, owner=owner, requester=requester, scope=scope)
@@ -601,7 +596,7 @@ class LiveRun:
                 response = disclosure.verify_for_school(self.settings, guardian)
         finally:
             self.node_request("evm_setAutomine", [True])
-            # the request is mined now; Python had already answered pending and released nothing
+            # mine it now; Python already answered pending and released nothing
             self.node_request("evm_mine", [])
         self.no_fields(f"school with automine off (no receipt in {PENDING_TIMEOUT_SECONDS} s)", response, OUTCOME_PENDING, None)
         response = disclosure.verify_for_school(dict(self.settings, rpc_url=self.closed_rpc_url), guardian)
@@ -632,7 +627,7 @@ class LiveRun:
         )
 
     def demo_denials(self) -> None:
-        # every denied request line in the demo transcript and what it released
+        # every denied request line in the demo transcript, and what it released
         row = self.rows["PY-02"]
         lines = [line for line in self.transcript.splitlines() if "-> denied (" in line or "-> unavailable (" in line]
         released = [line.rsplit("released: ", 1)[-1] for line in lines]
@@ -686,7 +681,7 @@ class LiveRun:
                 if settings is not None:
                     path.write_text(json.dumps(settings))
                 code, output, errors = _run([sys.executable, "-m", "integration.demo_workflow", "--settings", str(path)])
-                # the failure goes to stderr as one line; stdout is the transcript up to that step
+                # the failure is one line on stderr; stdout is the transcript up to that step
                 extra = ["a traceback"] if TRACEBACK in output else []
                 self.failure_seen(row, label, errors, errors.strip(), expected, extra, code)
             elsewhere = temp / "elsewhere"
@@ -752,7 +747,7 @@ class LiveRun:
                 self.contracts["ConsentManager"], guardian=guardian, requester=self.accounts[label], scope=scope, duration_days=days,
             )
         except TransactionRejected as error:
-            # an earlier step went wrong (for example the consent was never revoked); the run goes on
+            # an earlier step went wrong; keep going
             row.see(f"{what}: rejected {error.args[0] if error.args else 'Reverted'}", False)
             return
         after = self.balance("guardian")
@@ -766,7 +761,7 @@ class LiveRun:
         row.evidence.append(f"{what} tx {receipt['transaction_hash']}")
 
     def no_fields(self, label: str, response: AccessResponse, outcome: str, reason: str | None) -> None:
-        # reason None: any reason, because an unavailable or pending answer is never about the record
+        # reason None means any reason (unavailable or pending is never about the record)
         as_expected = response["fields"] == {} and response["outcome"] == outcome and (reason is None or response["reason"] == reason)
         self.rows["PY-02"].see(f"{label}: {_response_text(response)}", as_expected)
 
@@ -810,9 +805,9 @@ class LiveRun:
 def scan_transactions(
     client: Any, first_block: int, values: list[tuple[str, bytes]], local_hashes: set[bytes], demo_blocks: tuple[int, int],
 ) -> dict[str, Any]:
-    """Read every transaction from first_block to the latest block, with its receipt and trace.
-    Returns counts, ABI problems (anything that is not a known call, constructor or event with plain
-    types), the labels of private values found anywhere, and what the stored words are.
+    """Read every transaction from first_block to the latest, with receipt and trace.
+        Returns counts, ABI problems (anything that is not a known call, constructor or event with plain
+        types), labels of private values found anywhere, and what the stored words are.
     """
     from web3 import Web3
 
@@ -891,7 +886,7 @@ def scan_transactions(
 
 
 def run_checks(settings_path: Path) -> LiveRun:
-    """Every check in the order of the module docstring. Raises ExportError when the run cannot finish."""
+    """Every check in the order of the module docstring. Raises ExportError if the run cannot finish."""
     settings = _read_settings(settings_path)
     try:
         run = LiveRun(settings_path, settings)
@@ -925,7 +920,7 @@ def run_checks(settings_path: Path) -> LiveRun:
         except deploy_local.DeployError as error:
             raise ExportError(f"{name}: {error}") from None
         except (ChainUnavailable, TransactionRejected, TransactionPending, records.RecordError) as error:
-            # these messages hold no details by design
+            # these messages never contain details
             reason = error.args[0] if error.args else type(error).__name__
             raise ExportError(f"{name}: {type(error).__name__}: {reason}") from None
     return run
@@ -940,7 +935,7 @@ def main(argv: list[str] | None = None) -> int:
         "--output", type=Path, default=None, metavar="PATH", help="CSV to write (default: evaluation/results/test_results.csv)",
     )
     args = parser.parse_args(argv)
-    # the evidence names the options that were given, never their paths
+    # name the options used, never their paths
     command = COMMAND + " --settings PATH" * (args.settings is not None) + " --output PATH" * (args.output is not None)
     output = args.output or CSV_PATH
     try:
@@ -979,7 +974,7 @@ def _read_settings(path: Path) -> dict[str, Any]:
 
 
 def _outside_settings(settings: dict[str, Any], temp: Path) -> dict[str, Any]:
-    # a fresh data root in the temporary folder, and a record path outside it
+    # fresh data root in the temp folder, with the record path outside it
     data = temp / "data"
     return dict(
         settings,
@@ -991,7 +986,7 @@ def _outside_settings(settings: dict[str, Any], temp: Path) -> dict[str, Any]:
 
 
 def _plain(where: str, types: list[str], data: bytes, client: Any) -> list[str]:
-    # the ABI types are plain and the data decodes as exactly those types
+    # ABI types are plain and the data decodes as exactly those types
     problems = [f"{where}: {kind}" for kind in types if kind not in PLAIN_TYPES]
     if problems:
         return problems
@@ -1029,7 +1024,7 @@ def _git(*arguments: str) -> str:
 
 
 def _closed_rpc_url() -> str:
-    # a port that was free a moment ago, so nothing answers on it
+    # a port that was just free, so nothing answers on it
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
@@ -1079,7 +1074,7 @@ def _outside_repo(path: Path) -> bool:
 
 
 def _shown(path: Path) -> str:
-    # relative to the project, or only the file name: never the home folder
+    # project-relative path or file name only, never the home folder
     return records.shown_path(path)
 
 

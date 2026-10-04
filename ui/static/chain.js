@@ -1,28 +1,22 @@
 /* AI assistance: parts of this file were written with Claude (Anthropic) and thoroughly reviewed. */
-/* The Viem layer: the page's own connection to the contracts on the local Hardhat node (vendor/viem.js, the
-   global Viem). It sends register, attest, grant and revoke from the acting role's unlocked Hardhat account
-   (a JSON-RPC account: the node signs eth_sendTransaction, so the page holds no keys) and reads the contract
-   views for each poll. Addresses and ABIs come from GET /api/contracts, which the server answers only once
-   chain.load_contract has checked them against the node; the identity hash and the record commitment come
-   from the server too, because they need local files and salts. School and doctor requests stay in Python
-   (app/disclosure.py): they need the card itself. The contracts decide everything; this file only calls them
-   and turns their answers into the page's result shape with the console's texts (ui/actions.py). It uses
-   app.js's api() only when an action or a poll runs. */
+/* Talks to the contracts straight from the browser using Viem. The node signs the transactions, so the page
+   keeps no keys. Addresses and ABIs come from /api/contracts. School and doctor requests stay in Python
+   because they need the card file. */
 'use strict';
 
 const NODE_UNAVAILABLE = 'unavailable: local node not reachable or wrong chain';
 const SERVER_SILENT = 'the UI server did not answer';
-// as app/chain.py: one attempt per request with no retries, and a bounded wait for the receipt
+// same limits as app/chain.py: no retries, and a time limit on waiting for the receipt
 const RPC_TIMEOUT_MS = 10000;
 const RECEIPT_TIMEOUT_MS = 30000;
 const ZERO_HASH = `0x${'0'.repeat(64)}`;
 
 const chainLayer = {
-  config: null, // the checked contracts and clients of the deployment the page shows
-  errorNames: new Set(), // every custom error of the three contracts
+  config: null, // contracts and clients for the current deployment
+  errorNames: new Set(), // custom error names of all contracts
 };
 
-/** A result that is already in the page's shape (a server answer, or a fixed text), thrown past Viem calls. */
+/** A ready-made result that we throw to skip the normal Viem error handling. */
 class ChainAnswer extends Error {
   constructor(result) {
     super(result.message);
@@ -31,12 +25,12 @@ class ChainAnswer extends Error {
 }
 
 function outcome(status, message, tx, details) {
-  // the shape of ui/actions.py result()
+  // same shape as result() in ui/actions.py
   return { status, message, reason: '', tx: tx || '', fields: {}, details: { ...(details || {}) } };
 }
 
 function viemOutcome(status, message, tx, details) {
-  // the answer to a call this page sent to the node itself with Viem
+  // result of a call the page sent to the node itself
   return outcome(status, message, tx, { ...(details || {}), via: 'viem' });
 }
 
@@ -49,22 +43,21 @@ async function serverGet(path) {
 }
 
 function utc(seconds) {
-  // the text of ui/actions.py _utc: 2026-09-29 12:00:00 UTC
+  // same format as _utc in ui/actions.py, e.g. 2026-09-29 12:00:00 UTC
   return `${new Date(seconds * 1000).toISOString().slice(0, 19).replace('T', ' ')} UTC`;
 }
 
 /* ---------- contracts and clients ---------- */
 
 async function checkedContracts() {
-  // the server checks the deployment against the node every time (chain.load_contract), as Python does
-  // before each of its own transactions
+  // the server checks the deployment against the node each time, like Python does
   const answer = await serverGet('/api/contracts');
   if (answer.status !== 'ok') throw new ChainAnswer(answer);
   const d = answer.details;
-  // Viem's hardhat chain is 31337; with no checked URL the page has no allowed way to the node
+  // the Hardhat chain id is 31337; without a checked URL we do not connect
   if (d.chain_id !== Viem.hardhat.id || !d.rpc_url) throw new ChainAnswer(outcome('unavailable', NODE_UNAVAILABLE));
   const transport = () => Viem.http(d.rpc_url, { timeout: RPC_TIMEOUT_MS, retryCount: 0 });
-  // each call gets every contract's errors, so a revert from a nested call keeps its name (chain.error_name)
+  // every call gets all contracts' errors so a revert from a nested call still shows its name
   const errors = Object.values(d.contracts).flatMap((contract) => contract.abi.filter((item) => item.type === 'error'));
   errors.forEach((item) => chainLayer.errorNames.add(item.name));
   const wallets = {};
@@ -82,7 +75,7 @@ async function checkedContracts() {
 }
 
 function sameDeployment(config, deployment) {
-  // the deploy block tells two deployments apart even at the same addresses (a restarted node)
+  // the deploy block tells deployments apart even if the addresses are the same (restarted node)
   const names = Object.keys(config.contracts);
   return config.deploy_block === deployment.deploy_block
     && names.length === Object.keys(deployment.contracts).length
@@ -105,14 +98,14 @@ function read(config, name, functionName, args) {
 
 async function send(config, role, name, functionName, args) {
   const call = contractCall(config, name, functionName, args);
-  // an eth_call first, like web3's gas estimate in the Python path: a call the contract rejects is never mined
+  // simulate first, so a call the contract would reject is never sent
   await config.client.simulateContract({ ...call, account: config.accounts[role] });
   const hash = await config.wallets[role].writeContract(call);
   let receipt;
   try {
     receipt = await config.client.waitForTransactionReceipt({ hash, timeout: RECEIPT_TIMEOUT_MS });
   } catch (error) {
-    // sent, but no receipt in time or the node stopped answering: it may still be mined (chain.wait_for_receipt)
+    // no receipt in time, but the transaction may still get mined
     throw new ChainAnswer(viemOutcome('pending', 'pending: not confirmed', hash));
   }
   if (receipt.status !== 'success') throw new ChainAnswer(viemOutcome('rejected', 'rejected: Reverted', hash));
@@ -120,7 +113,7 @@ async function send(config, role, name, functionName, args) {
 }
 
 function failure(error) {
-  // the console's texts (ui/actions.py error_result); never the error itself, its text or a stack
+  // same texts as error_result in ui/actions.py; never show the raw error
   if (error instanceof ChainAnswer) return error.result;
   const reverted = cause(error, Viem.ContractFunctionRevertedError);
   if (reverted) {
@@ -151,7 +144,7 @@ async function chainAction(steps) {
 /* ---------- actions ---------- */
 
 function viemRegister(role) {
-  // registerUser with the role's salted identity hash; only that hash goes on-chain
+  // only the salted identity hash goes on-chain
   return chainAction(async () => {
     const answer = await serverGet(`/api/identity-hash?role=${encodeURIComponent(role)}`);
     if (answer.status !== 'ok') return answer;
@@ -163,8 +156,7 @@ function viemRegister(role) {
 }
 
 function viemAttest(role) {
-  // registerVaccination for the guardian's record, sent from the acting role: the registry itself refuses
-  // anyone but the trusted clinic (NotTrustedClinic)
+  // the registry refuses anyone but the trusted clinic (NotTrustedClinic)
   return chainAction(async () => {
     const answer = await serverGet('/api/record-commitment');
     if (answer.status !== 'ok') return answer;
@@ -176,8 +168,8 @@ function viemAttest(role) {
 }
 
 function viemGrant(role, requester, scope, daysText) {
-  // grantConsent; the manager mints the first grant's reward in the same transaction, shown as before -> after.
-  // Only whole numbers that fit the uint16 are sent (as chain.py does); the contract decides 1-365 days
+  // the first grant also mints a reward, so we show the balance before and after.
+  // Only whole numbers that fit in uint16 are sent; the contract checks the 1-365 day range
   return chainAction(async () => {
     const days = Number(daysText);
     if (String(daysText).trim() === '' || !Number.isInteger(days) || days < 0 || days > 65535) {
@@ -199,8 +191,8 @@ function viemGrant(role, requester, scope, daysText) {
 }
 
 function viemRevoke(role, requester, scope) {
-  // revokeConsent; a grant that was never made reverts NoConsentToRevoke, one already revoked is a no-op in the
-  // contract. The reward balance is read around it too: a revoke never takes the reward back
+  // revoking something never granted reverts (NoConsentToRevoke); revoking twice does nothing.
+  // The reward balance is shown too, since a revoke does not take the reward back
   return chainAction(async () => {
     const config = await checkedContracts();
     const { owner, other, code } = consentParties(config, role, requester, scope);
@@ -215,7 +207,7 @@ function viemRevoke(role, requester, scope) {
 }
 
 function consentParties(config, role, requester, scope) {
-  // the page only offers the listed requesters and scopes; anything else is refused before any chain call
+  // reject unknown requesters and scopes before touching the chain
   if (!(requester in config.accounts) || requester === role) throw new ChainAnswer(outcome('invalid', 'unknown requester'));
   if (!(scope in config.scopes)) throw new ChainAnswer(outcome('invalid', 'unknown scope'));
   return { owner: config.accounts[role], other: config.accounts[requester], code: config.scopes[scope] };
@@ -224,9 +216,8 @@ function consentParties(config, role, requester, scope) {
 /* ---------- the views of each poll ---------- */
 
 async function addChainViews(snapshot) {
-  // fills in registrations, record, consents, rewards and audit, in the shapes ui/actions.py state() sends,
-  // read from the node with Viem. Returns false when the snapshot should be dropped: the deployment changed
-  // between the state and /api/contracts, and the next poll shows the new one
+  // fills in registrations, record, consents, rewards and audit like state() in ui/actions.py.
+  // Returns false if the deployment changed in between; the next poll will fix it
   const s = snapshot;
   if (!s.node.reachable || !s.deployment.deployed) return true;
   try {
@@ -238,7 +229,7 @@ async function addChainViews(snapshot) {
     }
     Object.assign(s, await readViews(config, s));
   } catch (error) {
-    // like actions.state: the first chain error stands for the whole chain part, and none of it is shown
+    // like actions.state: one chain error hides the whole chain part
     const result = failure(error);
     if (result.message === NODE_UNAVAILABLE || !(error instanceof ChainAnswer)) {
       Object.assign(s.node, { reachable: false, message: result.message });
@@ -296,7 +287,7 @@ async function readViews(config, s) {
       return {
         time, time_text: utc(time),
         requester: names[event.args.requester.toLowerCase()] || event.args.requester,
-        // events can carry any uint8 scope (app/main.py scope_name)
+        // events can have any uint8 scope
         scope: config.scopeNames[event.args.scope] || `scope ${event.args.scope} (unsupported)`,
         allowed: event.args.allowed,
         reason: config.reasonNames[event.args.reason] || `reason ${event.args.reason}`,
@@ -307,8 +298,7 @@ async function readViews(config, s) {
 }
 
 function consentStatus(expiresAt, revoked, now) {
-  // the badge only, as ui/actions.py _consent_status shows it: the contract's order (never granted, revoked,
-  // expired at exactly its second, active). It never decides anything; requestAccess does
+  // only for the badge; the contract decides access in requestAccess
   if (expiresAt === 0) return 'none';
   if (revoked) return 'revoked';
   if (now >= expiresAt) return 'expired';

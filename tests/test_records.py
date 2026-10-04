@@ -1,6 +1,5 @@
 # AI assistance: parts of this file were written with Claude (Anthropic) and thoroughly reviewed.
-"""Tests for app/records.py. Only temporary directories are written to.
-"""
+"""Tests for app/records.py. Only temporary folders are written to."""
 import base64
 import json
 import os
@@ -527,10 +526,7 @@ class SetupRuntimeTests(RecordsTestCase):
 
 
 class DataRootTests(RecordsTestCase):
-    """settings data_root: the default, relative and absolute values, and a data root outside the project.
-    DATA_ROOT keeps its real value (<project>/runtime-data) here unless a test says otherwise, so only
-    data_root can allow the writes below, and none of them can land in the project.
-    """
+    """Tests for the data_root setting (default, relative, absolute and outside the project)."""
 
     def setUp(self):
         folder = tempfile.TemporaryDirectory()

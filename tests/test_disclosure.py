@@ -1,6 +1,5 @@
 # AI assistance: parts of this file were written with Claude (Anthropic) and thoroughly reviewed.
-"""Tests for the disclosure views and denial messages in app/disclosure.py.
-"""
+"""Tests for the disclosure views and denial messages in app/disclosure.py."""
 import copy
 import unittest
 

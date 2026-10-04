@@ -1,6 +1,5 @@
 # AI assistance: parts of this file were written with Claude (Anthropic) and thoroughly reviewed.
-"""Tests for perform_access and its two wrappers in app/disclosure.py, run against the fake chain.
-"""
+"""Tests for perform_access and its wrappers in app/disclosure.py, using the fake chain."""
 import unittest
 
 from app import disclosure, records

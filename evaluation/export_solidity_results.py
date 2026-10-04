@@ -1,34 +1,30 @@
 # AI assistance: parts of this file were written with Claude (Anthropic) and thoroughly reviewed.
-"""Run the Solidity unit tests and export the REAL results as CSV rows.
+"""Run the Solidity unit tests and export the real results as CSV rows.
 
 Usage, from the project root (after `npm ci`):
 
     python -m evaluation.export_solidity_results
     python -m evaluation.export_solidity_results --config some.config.ts   # optional extra global Hardhat args
 
-It runs `npx hardhat test solidity`, saves the raw console log to evaluation/results/solidity_test_run.log,
-and writes evaluation/results/solidity_test_results.csv with the shared header
-(test_id, requirement, why_critical, expected, actual, status, evidence). It writes only the SOL rows, in
-their own file, so it can never overwrite the Python (PY) rows kept elsewhere under the same header.
+It runs `npx hardhat test solidity`, saves the raw log to evaluation/results/solidity_test_run.log, and
+writes evaluation/results/solidity_test_results.csv with the shared header
+(test_id, requirement, why_critical, expected, actual, status, evidence). Only the SOL rows are written, in
+their own file, so the Python (PY) rows are never overwritten.
 
-Nothing is prefilled: `requirement`, `why_critical` and `expected` come from each test's NatSpec
-(@custom:requirement, "@dev Why it matters:", @notice), while `actual` and `status` come only from
-the run output. Status is "pass" or "fail":
-- a test Hardhat lists as passing is "pass"; one it lists as failing is "fail" with Hardhat's error line;
-- when a suite's setUp() fails, none of its tests runs and Hardhat counts the suite as one failure. Each of
-  its tests is still written as "fail", with actual "not run: setUp() failed: ...", so a broken fixture
-  can never look like a skipped (missing) row;
-- a test that Hardhat lists as skipped, or that does not appear in the output at all, gets no row, so a
-  missing row means "not run".
+Nothing is prefilled: requirement, why_critical and expected come from each test's NatSpec
+(@custom:requirement, "@dev Why it matters:", @notice); actual and status come only from the run output.
+- a test Hardhat lists as passing is "pass"; one listed as failing is "fail" with Hardhat's error line;
+- if a suite's setUp() fails, each of its tests is written as "fail" with "not run: setUp() failed: ...";
+- a test that is skipped, or missing from the output, gets no row, so a missing row means "not run".
 
 The exporter refuses to write a CSV that could disagree with Hardhat:
-- before running, every test function in test/*.t.sol must carry exactly one `@notice [SOL-XX-nn]` id
-  (in a /// or /** */ NatSpec block), and no id may repeat;
-- after running, every test Hardhat lists must match a tagged function, and the pass/fail/skip counts
-  must equal Hardhat's own "N passing" / "M failing" / "K skipped" summary.
-If the run gives no usable results, the previous CSV is deleted so it cannot be mistaken for this run's
-evidence (the raw log of the failed run is kept). Exit status: 0 when the CSV was written and every test
-passed, 1 otherwise. Standard library only.
+- before running, every test function in test/*.t.sol needs exactly one `@notice [SOL-XX-nn]` id, and no
+  id may repeat;
+- after running, every listed test must match a tagged function, and the pass/fail/skip counts must equal
+  Hardhat's own summary.
+If there are no usable results, the previous CSV is deleted so it is not mistaken for this run (the raw log
+is kept). Exit status: 0 if the CSV was written and every test passed, 1 otherwise. Standard library only.
+
 """
 
 from __future__ import annotations
@@ -52,7 +48,7 @@ HEADER = ["test_id", "requirement", "why_critical", "expected", "actual", "statu
 
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 SUITE_LINE = re.compile(r"^\s{2}(test/\S+\.t\.sol):(\w+)\s*$")
-# "    ✔ testName()" or "    ✔ testFuzz(address) (runs: 256)" (the tick glyph varies by terminal)
+# matches "    ✔ testName()" or "    ✔ testFuzz(address) (runs: 256)" (the tick differs by terminal)
 PASS_LINE = re.compile(r"^\s{4}(?!-\s)[^\w\s]{1,3}\s+(test\w*)\([^)]*\)")
 SKIP_LINE = re.compile(r"^\s{4}-\s+(test\w*)\([^)]*\)")  # "    - testName()" (vm.skip)
 FAIL_LINE = re.compile(r"^\s{4}(\d+)\)\s+(\w+)\([^)]*\)")  # "    3) testName()" or "    1) setUp()"
@@ -60,7 +56,7 @@ FAIL_DETAIL = re.compile(r"^\s{2}(\d+)\)\s+(\w+)#(\w+)\([^)]*\)")  # "  3) Contr
 SUMMARY = re.compile(r"^\s*(\d+)\s+(passing|failing|skipped)\b")
 
 CONTRACT_DECL = re.compile(r"^\s*(?:abstract\s+)?contract\s+(\w+)", re.MULTILINE)
-# forge runs public/external functions whose name starts with "test"; group 2 is the header up to the body.
+# forge runs public/external functions starting with "test"; group 2 is the header up to the body
 TEST_FUNCTION = re.compile(r"^[ \t]*function\s+(test\w*)\s*\(([^{;]*)", re.MULTILINE)
 RUNNABLE = re.compile(r"\b(public|external)\b")
 ID_TAG = re.compile(r"@notice\s+\[([^\]]*)\]\s*(.*)", re.DOTALL)
@@ -83,7 +79,7 @@ class TestMeta:
 
 
 def _natspec_above(text: str, position: int) -> str:
-    """Return the /// or /** */ NatSpec block directly above `position`, as plain lines ("" if none)."""
+    """The /// or /** */ NatSpec block directly above `position`, as plain lines ("" if none)."""
     lines = text[:position].splitlines()
     block: list[str] = []
     while lines and lines[-1].strip().startswith("///"):
@@ -100,8 +96,9 @@ def _natspec_above(text: str, position: int) -> str:
 
 
 def parse_test_metadata(test_dir: Path = TEST_DIR) -> dict[tuple[str, str], TestMeta]:
-    """Read the id and descriptions from the NatSpec above every test function; raise ExportError on a
-    function without a well-formed id or on a repeated id."""
+    """Read the id and descriptions from the NatSpec above every test function. Raises ExportError for a
+        missing or badly formed id, or a repeated id.
+    """
     metas: dict[tuple[str, str], TestMeta] = {}
     problems: list[str] = []
     seen_ids: dict[str, str] = {}
@@ -152,8 +149,7 @@ def hardhat_command(extra_args: list[str]) -> list[str]:
 def run_tests(command: list[str]) -> tuple[int, str]:
     """Run Hardhat and return (exit code, console output without colour codes)."""
     if not (ROOT / "node_modules" / "hardhat" / "package.json").is_file():
-        # Without this check npx would offer to download Hardhat, and the question would vanish into
-        # the captured output.
+        # without this check npx would offer to download Hardhat and the question would be swallowed
         raise ExportError("Hardhat is not installed in this project: run `npm ci` in the project root first")
     try:
         completed = subprocess.run(
@@ -174,9 +170,9 @@ def run_tests(command: list[str]) -> tuple[int, str]:
 def parse_output(output: str, metas: dict[tuple[str, str], TestMeta]):
     """Return ({(contract, function): (status, actual)}, counts) for every test in the output.
 
-    counts holds Hardhat's own summary ("passing", "failing", "skipped"; a missing key was not printed)
-    plus what was parsed from the listing ("failure_entries", "skipped_entries").
-    Raise ExportError when a listed test cannot be matched to a tagged function.
+        counts has Hardhat's own summary ("passing", "failing", "skipped"; a missing key was not printed) plus
+        what was parsed from the listing ("failure_entries", "skipped_entries").
+        Raises ExportError if a listed test does not match a tagged function.
     """
     results: dict[tuple[str, str], tuple[str, str]] = {}
     failure_index: dict[str, tuple[str, str]] = {}  # "3" -> (contract, function)
@@ -278,7 +274,7 @@ def main(argv: list[str] | None = None) -> int:
     if any(arg in ("-h", "--help") for arg in argv):
         print(__doc__)
         return 0
-    # Everything else goes to Hardhat unchanged and in order (global options such as --config x.ts).
+    # everything else goes to Hardhat unchanged (e.g. --config x.ts)
     command = hardhat_command(argv)
 
     try:

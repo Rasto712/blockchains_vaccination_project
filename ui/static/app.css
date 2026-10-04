@@ -1,5 +1,5 @@
 /* AI assistance: parts of this file were written with Claude (Anthropic) and thoroughly reviewed. */
-/* Large type and strong contrast, so the page reads on a projector. System fonts only: the demo is offline. */
+/* Large text and high contrast so it reads on a projector. System fonts only, since the demo is offline. */
 
 :root {
   --bg: #eef1f5;
@@ -243,7 +243,7 @@ button:focus-visible, input:focus-visible, summary:focus-visible { outline: 3px 
 .control { display: grid; gap: 0.4rem; padding-top: 0.6rem; border-top: 1px solid var(--line); }
 .control select { font: inherit; padding: 0.3rem 0.4rem; border: 2px solid var(--line); border-radius: 6px; max-width: 100%; }
 
-/* the result of the last guided step, in its role's card and in the audit timeline */
+/* result of the last guided step */
 .highlight { box-shadow: 0 0 0 3px #f59e0b; animation: flash 1.2s ease-out 1; }
 @keyframes flash { from { box-shadow: 0 0 0 8px #fbbf24; } to { box-shadow: 0 0 0 3px #f59e0b; } }
 

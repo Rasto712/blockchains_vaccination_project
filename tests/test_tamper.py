@@ -1,6 +1,5 @@
 # AI assistance: parts of this file were written with Claude (Anthropic) and thoroughly reviewed.
-"""Tests for the tamper demonstration in integration/demo_workflow.py, run against the fake chain.
-"""
+"""Tests for the tamper demo in integration/demo_workflow.py, using the fake chain."""
 import contextlib
 import hashlib
 import io

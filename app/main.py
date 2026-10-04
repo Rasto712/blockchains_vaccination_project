@@ -1,10 +1,7 @@
 # AI assistance: parts of this file were written with Claude (Anthropic) and thoroughly reviewed.
-"""Plain console workflow for the local demo.
-One menu covers setup, register, attest, grant, revoke, school check, doctor view, rewards and audit.
-The tamper and exact-expiry steps run in integration/demo_workflow.py instead.
-Exception text is never printed, only a short outcome or the error name. The one exception is
-RecordError, whose messages never hold data, salts or paths. File paths are shown relative to the project
-or as <data_root>/..., never with the home folder.
+"""Simple console menu for the local demo.
+The tamper and expiry steps are in integration/demo_workflow.py instead.
+Exception text is not printed, only a short message or the error name.
 """
 import json
 from datetime import datetime, timezone
@@ -34,9 +31,7 @@ ACTIONS = (
 
 
 def show_menu() -> str:
-    """Show actions for register, clinic-attest, grant, revoke, school-check, doctor-view, rewards and audit.
-    Return a validated choice. 
-    """
+    """Print the menu and return the chosen action."""
     print()
     for number, (_, text) in enumerate(ACTIONS, 1):
         print(f"{number:>2}. {text}")
@@ -44,17 +39,12 @@ def show_menu() -> str:
 
 
 def select_actor(settings: dict[str, Any]) -> str:
-    """Select a predefined deployer/clinic/guardian/school/doctor label for local demo use.
-    Never treat an unknown label as administrator or silently reuse another signer.
-    """
+    """Pick which demo actor to act as."""
     return pick_label("act as", settings)
 
 
 def dispatch_action(choice: str, actor_label: str, settings: dict[str, Any]) -> None:
-    """Connect one menu choice to records/chain/disclosure helpers.
-    Handle pending, denied and unavailable outcomes distinctly without exposing private data.
-    "not implemented" is only a console message for NotImplementedError, not an outcome.
-    """
+    """Run the chosen action and print a short message for any error."""
     handler = HANDLERS.get(choice)
     if handler is None:
         print("unknown choice")
@@ -62,15 +52,12 @@ def dispatch_action(choice: str, actor_label: str, settings: dict[str, Any]) -> 
     try:
         handler(actor_label, settings)
     except EOFError:
-        # end of input means quit, handled by run_console
         raise
     except NotImplementedError:
         print(disclosure.NOT_IMPLEMENTED_MESSAGE)
     except ArtifactUnavailable:
-        # deploy_local would stop at the same missing artifact, so name the step before it
         print(f"unavailable: {disclosure.NO_ARTIFACTS_MESSAGE}")
     except DeploymentUnavailable:
-        # the node answered; deployment.json is missing, stale or for other contracts
         print(f"unavailable: {disclosure.NO_DEPLOYMENT_MESSAGE}")
     except Web3NotInstalled:
         print(f"unavailable: {disclosure.NO_WEB3_MESSAGE}")
@@ -81,14 +68,13 @@ def dispatch_action(choice: str, actor_label: str, settings: dict[str, Any]) -> 
     except TransactionRejected as error:
         print(f"rejected: {error.args[0] if error.args else 'reverted'}")
     except records.RecordError as error:
-        # these messages never hold data, salts or paths
         print(f"unavailable: {error}")
     except Exception as error:
         print(f"failed: {type(error).__name__}")
 
 
 def run_console(settings_path: Path) -> None:
-    """Load settings and run the menu until quit. Setup and "show my registration" work without a node."""
+    """Load settings and run the menu until quit."""
     try:
         settings = json.loads(Path(settings_path).read_bytes())
     except OSError:
@@ -113,7 +99,7 @@ def run_console(settings_path: Path) -> None:
 
 
 def main() -> None:
-    """Start the console with config/settings.json."""
+    """Start the console."""
     print("My Vaccination Card console (local Hardhat demo)")
     run_console(SETTINGS_FILE)
 
@@ -156,12 +142,12 @@ def record_snapshot(settings: dict[str, Any]) -> Any:
 
 
 def shown_path(path: Path, settings: dict[str, Any] | None = None) -> str:
-    # relative to the project, <data_root>/..., or the file name: never the home folder
+    # never show the home folder
     return records.shown_path(path, settings)
 
 
 def scope_name(value: int) -> str:
-    # events can carry any uint8 scope, so never assume a valid Scope
+    # events can have any scope number
     return Scope(value).name if value in (1, 2) else f"scope {value} (unsupported)"
 
 
@@ -197,7 +183,7 @@ def do_register(actor_label: str, settings: dict[str, Any]) -> None:
 
 
 def do_attest(actor_label: str, settings: dict[str, Any]) -> None:
-    # sent from the current actor; the registry itself refuses anyone but the trusted clinic
+    # the registry only accepts the trusted clinic
     commitment = record_snapshot(settings)["commitment"]
     client = chain.connect(settings)
     clinic = chain.select_account(client, actor_label, settings)
@@ -209,7 +195,6 @@ def do_attest(actor_label: str, settings: dict[str, Any]) -> None:
 
 
 def do_grant(actor_label: str, settings: dict[str, Any]) -> None:
-    # every answer is checked before any chain call
     requester_label = pick_label("grant to", settings, leave_out=actor_label)
     scope = pick_scope()
     days = ask_number("days (1 to 365): ", 1, 365)
@@ -271,7 +256,7 @@ def do_audit(actor_label: str, settings: dict[str, Any]) -> None:
 
 
 def do_show_registration(actor_label: str, settings: dict[str, Any]) -> None:
-    # local hashes first, so this still works with no node running
+    # local hashes first so this works without a node
     if actor_label not in records.REGISTERING_LABELS:
         print(f"{actor_label} does not register, so there is nothing to show")
         return

@@ -1,7 +1,6 @@
 # AI assistance: parts of this file were written with Claude (Anthropic) and thoroughly reviewed.
-"""Endpoint tests for the web UI (ui/server.py and ui/actions.py), over real HTTP on a free port of 127.0.0.1.
-No node: FakeNode from tests/test_demo.py stands in for app.chain (plus block times), and deploy_local.run
-is mocked. The same pages were also clicked through on a real node.
+"""Endpoint tests for the web UI (ui/server.py and ui/actions.py) over real HTTP on localhost.
+No node, the fake node from tests/test_demo.py is used.
 """
 import base64
 import contextlib
@@ -33,7 +32,7 @@ NO_WEB3 = "unavailable: web3 not installed: run python -m pip install -r require
 
 
 class UITestCase(unittest.TestCase):
-    """A temporary runtime folder, a settings file, FakeNode in app.chain, and the server on a free port."""
+    """Temp runtime folder, settings file, FakeNode and a server on a free port."""
 
     def setUp(self):
         self.root, self.settings = temp_runtime(self)
@@ -114,7 +113,7 @@ class UITestCase(unittest.TestCase):
         return self.call("POST", path, body if body is not None else {}, status=status)
 
     def ready(self):
-        """Local files, the three registrations and the clinic attestation, as after setup."""
+        """Local files, registrations and attestation, as after setup."""
         return prepare_demo(self.fake, self.settings)
 
     def grant(self, requester, scope, days=30):

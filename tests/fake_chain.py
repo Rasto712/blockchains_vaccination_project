@@ -1,10 +1,6 @@
 # AI assistance: parts of this file were written with Claude (Anthropic) and thoroughly reviewed.
-"""A small stand-in for app.chain, for unit tests only. Never import it from app/ or integration/.
-Signatures match app/chain.py, so a wrong keyword fails the test. Access follows the frozen precedence:
-unsupported scope, not registered, missing evidence, no consent, revoked, expired, then the hash.
-Like the real module: caller mistakes (not an address, a hash that is not 32 bytes, a scope outside 0-255,
-days outside 0-65535) are ValueError, business rules are named rejections or denial reasons, and returned
-event addresses are in their canonical mixed case whatever case was passed in.
+"""A fake app.chain for unit tests only. Do not import it from app/ or integration/.
+It follows the same rules and error names as the real contracts.
 """
 from unittest import mock
 
@@ -226,7 +222,7 @@ class FakeChain:
 
 
 def install(test, fake):
-    """Swap the fake into app.chain for one test, so every "chain.x(...)" caller sees it."""
+    """Put the fake into app.chain for one test."""
     for name in FAKED:
         patcher = mock.patch.object(chain, name, getattr(fake, name))
         patcher.start()
@@ -234,7 +230,7 @@ def install(test, fake):
 
 
 def prepare_demo(fake, settings):
-    """Runtime files, the three registrations and the clinic attestation, as in demo step 1."""
+    """Set up files, registrations and attestation like demo step 1."""
     records.setup_runtime(settings)
     for label in records.REGISTERING_LABELS:
         identity_hash = records.prepare_identity(*records.identity_paths(settings, label))

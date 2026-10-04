@@ -6,15 +6,8 @@ import {Test} from "forge-std/Test.sol";
 import {Vm} from "forge-std/Vm.sol";
 import {IdentityRegistry} from "../contracts/IdentityRegistry.sol";
 
-/**
- * @title IdentityRegistryTest
- * @notice Solidity unit tests for IdentityRegistry (run with `npm test`, Hardhat 3 + forge-std).
- * @dev Test IDs SOL-IR-01..09 are stable; evaluation/results/solidity_test_results.csv
- *      (written by evaluation/export_solidity_results.py) cites them.
- *      Every test has a "Why it matters" line. Actors are synthetic addresses from makeAddr; hashes are
- *      synthetic bytes32 constants (the real ones are Python's SHA-256 commitments, which the contract
- *      treats as opaque bytes32 anyway).
- */
+/// Tests for IdentityRegistry. Test IDs (SOL-IR-xx) are used by the results export.
+/// Addresses and hashes are made-up test values.
 contract IdentityRegistryTest is Test {
     IdentityRegistry internal registry;
 
@@ -32,7 +25,7 @@ contract IdentityRegistryTest is Test {
     event UserRegistered(address indexed account, bytes32 identityHash);
     event VaccinationRegistered(address indexed guardian, address indexed clinic, bytes32 recordHash);
 
-    /// @notice Deploy a fresh registry with one trusted clinic before every test.
+    // Fresh registry before every test.
     function setUp() public {
         registry = new IdentityRegistry(clinic);
     }
@@ -58,8 +51,8 @@ contract IdentityRegistryTest is Test {
 
     // ------------------------------------------------------------------ tests
 
-    /// @notice [SOL-IR-01] Register a nonzero identity hash from one wallet; assert the registered flag (derived from the nonzero hash), the stored hash and the UserRegistered event.
-    /// @dev Why it matters: every consent and access check starts from "is this wallet registered", so registration must bind the hash to msg.sender.
+    /// @notice [SOL-IR-01] A wallet registers a nonzero identity hash and it is stored with the event.
+    /// @dev Why it matters: Every later check starts from the wallet being registered.
     /// @custom:requirement Registration/clinic: a wallet binds to one nonzero identity commitment
     function testRegisterUserStoresHash() public {
         vm.expectEmit(true, false, false, true, address(registry));
@@ -67,12 +60,12 @@ contract IdentityRegistryTest is Test {
         _register(guardian, GUARDIAN_ID);
 
         _assertInfo(guardian, true, GUARDIAN_ID, bytes32(0));
-        // Registration is per wallet: another account is unaffected.
+        // Another account is unaffected.
         _assertInfo(school, false, bytes32(0), bytes32(0));
     }
 
-    /// @notice [SOL-IR-02] Prove duplicate registration and zero hashes are rejected without corrupting previous state.
-    /// @dev Why it matters: a second registration could swap a wallet's identity after consents were granted; a zero hash is not a commitment.
+    /// @notice [SOL-IR-02] Duplicate registration and zero hashes are rejected and old state stays the same.
+    /// @dev Why it matters: A second registration could swap a wallet's identity.
     /// @custom:requirement Registration/clinic: duplicate and zero registrations are rejected
     function testRejectDuplicateOrZeroRegistration() public {
         vm.prank(guardian);
@@ -94,21 +87,21 @@ contract IdentityRegistryTest is Test {
         _assertInfo(guardian, true, GUARDIAN_ID, bytes32(0));
     }
 
-    /// @notice [SOL-IR-03] Use distinct clinic and attacker callers; only the configured clinic may attest, judged by msg.sender (a call whose tx.origin is the clinic is still rejected).
-    /// @dev Why it matters: the vaccination commitment is the evidence every access is checked against; only the trusted issuer may create it. A tx.origin check would let any contract the clinic's wallet calls attest in its name.
+    /// @notice [SOL-IR-03] Only the clinic can attest, judged by msg.sender (not tx.origin).
+    /// @dev Why it matters: Only the trusted clinic should create the evidence hash.
     /// @custom:requirement Registration/clinic: only the trusted clinic attests a vaccination
     function testOnlyTrustedClinicCanAttest() public {
         _register(guardian, GUARDIAN_ID);
         _register(attacker, SCHOOL_ID);
 
-        // An outsider, a registered attacker, the guardian itself and the deployer (this test contract) all fail.
+        // Outsider, attacker, guardian and deployer all fail.
         address[4] memory notClinic = [makeAddr("stranger"), attacker, guardian, address(this)];
         for (uint256 i = 0; i < notClinic.length; i++) {
             vm.prank(notClinic[i]);
             vm.expectRevert(IdentityRegistry.NotTrustedClinic.selector);
             registry.registerVaccination(guardian, RECORD);
         }
-        // A call reached from the clinic's own transaction (tx.origin == clinic) through another account.
+        // tx.origin is the clinic but msg.sender is not.
         vm.prank(attacker, clinic);
         vm.expectRevert(IdentityRegistry.NotTrustedClinic.selector);
         registry.registerVaccination(guardian, RECORD);
@@ -125,8 +118,8 @@ contract IdentityRegistryTest is Test {
         _assertInfo(guardian, true, GUARDIAN_ID, RECORD);
     }
 
-    /// @notice [SOL-IR-04] Reject unregistered guardians, zero record hashes and overwriting frozen evidence.
-    /// @dev Why it matters: frozen evidence means a later (possibly tampered) file can never replace the attested commitment.
+    /// @notice [SOL-IR-04] Reject unregistered guardians, zero hashes and overwriting a stored record hash.
+    /// @dev Why it matters: The stored hash is frozen so a tampered file can't replace it.
     /// @custom:requirement Registration/clinic: evidence needs a registered guardian and is frozen
     function testRejectMissingGuardianOrReplacementHash() public {
         vm.prank(clinic);
@@ -152,8 +145,8 @@ contract IdentityRegistryTest is Test {
         _assertInfo(guardian, true, GUARDIAN_ID, RECORD);
     }
 
-    /// @notice [SOL-IR-05] The read API and the registry events carry only fixed-size commitments: getUserInfo returns three static words (flag and two bytes32), and each event carries one bytes32 of data plus indexed addresses.
-    /// @dev Why it matters: the chain is public, so reads and logs must expose references only, never identity or health plaintext.
+    /// @notice [SOL-IR-05] Reads and events only expose fixed-size hashes.
+    /// @dev Why it matters: The chain is public, so no plain data should show up.
     /// @custom:requirement Data minimisation: the read API and the events expose commitments only
     function testRetrieveReferencesContainsNoPlaintext() public {
         vm.recordLogs();
@@ -161,7 +154,7 @@ contract IdentityRegistryTest is Test {
         _attest(guardian, RECORD);
         Vm.Log[] memory logs = vm.getRecordedLogs();
 
-        // One event per call, each with a single 32-byte data word (the commitment) and only address topics.
+        // One event per call: one 32-byte data word and only address topics.
         assertEq(logs.length, 2, "one event per call, nothing else logged");
         assertEq(logs[0].emitter, address(registry));
         assertEq(logs[0].topics.length, 2, "UserRegistered: signature + account");
@@ -173,8 +166,7 @@ contract IdentityRegistryTest is Test {
         assertEq(logs[1].topics[2], bytes32(uint256(uint160(clinic))));
         assertEq(logs[1].data, abi.encode(RECORD), "VaccinationRegistered data = record commitment only");
 
-        // Raw ABI return data is exactly three 32-byte words: bool, bytes32, bytes32. This is a shape check
-        // (the declared return types already fix it); the value checks below are what compare the content.
+        // Return data should be exactly three 32-byte words.
         (bool ok, bytes memory ret) =
             address(registry).staticcall(abi.encodeCall(IdentityRegistry.getUserInfo, (guardian)));
         assertTrue(ok, "getUserInfo succeeds");
@@ -186,8 +178,8 @@ contract IdentityRegistryTest is Test {
         assertEq(v, RECORD, "record commitment returned exactly");
     }
 
-    /// @notice [SOL-IR-06] getUserInfo on a fresh address returns (false, 0, 0) without reverting; registered non-guardians and unattested guardians have vaccinationHash 0.
-    /// @dev Why it matters: ConsentManager and the Python menu call getUserInfo for unregistered parties; a revert would erase the denied AccessAttempt event.
+    /// @notice [SOL-IR-06] getUserInfo on an unknown address returns (false, 0, 0) and doesn't revert.
+    /// @dev Why it matters: A revert would erase the denied AccessAttempt event.
     /// @custom:requirement Audit/integrity: lookups of unregistered accounts never revert
     function testGetUserInfoForUnregisteredAndUnattestedAccounts() public {
         _assertInfo(makeAddr("fresh"), false, bytes32(0), bytes32(0));
@@ -200,8 +192,8 @@ contract IdentityRegistryTest is Test {
         _assertInfo(guardian, true, GUARDIAN_ID, bytes32(0));
     }
 
-    /// @notice [SOL-IR-07] The constructor rejects a zero clinic and stores the configured clinic.
-    /// @dev Why it matters: with a zero clinic nobody could ever attest, and the trusted issuer must be fixed at deployment, not chosen later.
+    /// @notice [SOL-IR-07] The constructor rejects a zero clinic and stores the given one.
+    /// @dev Why it matters: The clinic is fixed at deployment.
     /// @custom:requirement Registration/clinic: the trusted clinic is fixed at deployment
     function testConstructorRejectsZeroClinicAndStoresClinic() public {
         vm.expectRevert(IdentityRegistry.ZeroAddress.selector);
@@ -210,8 +202,8 @@ contract IdentityRegistryTest is Test {
         assertEq(registry.trustedClinic(), clinic, "trusted clinic");
     }
 
-    /// @notice [SOL-IR-08] Revert order: attestation checks NotTrustedClinic, then NotRegistered, then ZeroHash, then EvidenceAlreadyRegistered; registration checks ZeroHash before AlreadyRegistered.
-    /// @dev Why it matters: the menu prints the bare error name, so a wrong actor must always see "rejected: NotTrustedClinic" whatever else is wrong.
+    /// @notice [SOL-IR-08] Check the order of reverts when several things are wrong at once.
+    /// @dev Why it matters: The menu shows the first error name, so the order matters.
     /// @custom:requirement Interface: revert order matches the Python error messages
     function testAttestationAndRegistrationRevertOrder() public {
         // Wrong caller + unregistered guardian + zero hash -> NotTrustedClinic.
@@ -242,8 +234,8 @@ contract IdentityRegistryTest is Test {
         registry.registerVaccination(guardian, bytes32(0));
     }
 
-    /// @notice [SOL-IR-09] Stated limitation: identity commitments are not unique across wallets. A second wallet may register a copy of another wallet's public commitment; both stay registered with the same hash, and the copy gains no evidence.
-    /// @dev Why it matters: registration binds a commitment to a wallet, not to a person, so it is neither identity proof nor Sybil resistance. A uniqueness check would not help: a fresh salt gives a fresh commitment.
+    /// @notice [SOL-IR-09] Known limitation: another wallet can register a copy of someone's hash, and it gets no evidence.
+    /// @dev Why it matters: A hash is tied to a wallet, not to a person.
     /// @custom:requirement Registration/clinic: stated limitation, a commitment identifies no one on its own
     function testIdentityCommitmentsAreNotUnique() public {
         _register(guardian, GUARDIAN_ID);

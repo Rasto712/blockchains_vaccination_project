@@ -2,15 +2,11 @@
 """Gas and timing measurements from real local transactions.
 Run from the project root after npm run compile, with npm run node running:
     .venv/bin/python -m evaluation.measure [--settings PATH] [--output-dir DIR]
-For 1, 5 and 10 requesters (scenario_requester_account_indices) it deploys fresh contracts and runs one
-scenario in which every role acts, then writes gas_results.csv, timing_results.csv (one row per operation)
-and timing_summary.csv (per-role and whole-run means over the same transactions, kept apart so that no
-transaction is counted twice in one table) with the template headers, plus ENVIRONMENT.md (compiler, node,
-automine, machine), to evaluation/results/.
+For 1, 5 and 10 requesters it deploys fresh contracts, runs one scenario where every role acts, and writes
+gas_results.csv, timing_results.csv, timing_summary.csv and ENVIRONMENT.md to evaluation/results/.
 Gas is gasUsed from successful receipts; times come from time.monotonic around each transaction. Nothing is
-estimated, converted to money or prefilled: a missing row or a blank cell means not measured, never zero.
-These are local Hardhat automine measurements for the demo, not public-chain throughput or latency.
-Identities and the record hash are synthetic hashes made here, so no local file or runtime-data is read.
+estimated or prefilled: a blank cell means not measured, never zero. These are local Hardhat numbers,
+not public-chain ones. Identities and record hashes are synthetic, so no local file is read.
 """
 import argparse
 import csv
@@ -50,10 +46,10 @@ COMPILER_NOTE = "solc 0.8.28, optimiser on, 200 runs"
 SUMMARY_KEYS = ("requester_count", "role", "contract", "function", "scenario")
 ROLE_LABELS = ("deployer", "clinic", "guardian")
 NO_ROLES = "the settings have no usable deployer, clinic and guardian account indices"
-# an uncommitted change under these changes what the tables measure, so ENVIRONMENT.md's commit label says so
+# uncommitted changes here change what is measured, so ENVIRONMENT.md says so
 CODE_PATHS = ("contracts", "app", "scripts", "evaluation/measure.py", "hardhat.config.ts", "package.json")
 
-# scenario labels; the gas and timing tables group by them
+# scenario labels, used to group the tables
 DEPLOYED = "fresh deployment for the run"
 MINTER = "one-time minter setup (ConsentManager)"
 REGISTERS = "registers a synthetic identity hash"
@@ -96,14 +92,12 @@ TIMING_NOTES = {
 
 
 class MeasureError(RuntimeError):
-    """The measurement run cannot continue or its result would be wrong. The message is safe to print."""
+    """The run cannot continue or its result would be wrong. The message is safe to print."""
 
 
 def record_deployment_cost(contract_name: str, receipt: Receipt) -> dict[str, Any]:
-    """Extract actual gasUsed for one successful deployment, not an estimate or fiat conversion.
-    Returns contract, gas_used, transaction_hash, block_number and contract_address from the receipt.
-    A receipt that is not successful, or has no positive whole gasUsed, raises ValueError.
-    deploy_local.deploy_all calls this for its three deploy receipts, and so does the scenario here.
+    """Get the actual gasUsed of one successful deployment from its receipt.
+        A failed receipt, or one without a positive whole gasUsed, raises ValueError.
     """
     if contract_name not in chain.CONTRACT_NAMES:
         raise ValueError("unknown contract")
@@ -123,14 +117,11 @@ def record_deployment_cost(contract_name: str, receipt: Receipt) -> dict[str, An
 
 
 def measure_transaction(send_transaction: Any, decode_event: Any = None) -> dict[str, Any]:
-    """Use a monotonic clock before send, after successful receipt and after decoding the event.
-    Return elapsed seconds and actual gasUsed; report failed/pending calls separately.
-    send_transaction takes no arguments, sends one transaction and returns its successful Receipt (the
-    app.chain helpers do exactly that). decode_event, if given, takes that receipt and returns the decoded
-    event, raising ChainUnavailable when it is missing or wrong.
-    status is "ok", or for a failure "rejected" (error holds the Solidity error name), "pending",
-    "unavailable" or "no_event". Failed calls keep gas_used and the times None, so they never enter an
-    average. started_at and finished_at are the raw monotonic readings, for the run's wall clock.
+    """Send one transaction and time it (monotonic clock) from before the send to after the event is decoded.
+        Returns elapsed seconds and gasUsed. status is "ok", or "rejected" (error holds the Solidity error name),
+        "pending", "unavailable" or "no_event". Failed calls keep gas_used and times as None, so they never
+        count in an average. send_transaction sends one transaction and returns its Receipt; decode_event, if
+        given, decodes the event from that receipt.
     """
     started = time.monotonic()
     result: dict[str, Any] = {
@@ -168,22 +159,17 @@ def measure_transaction(send_transaction: Any, decode_event: Any = None) -> dict
 
 
 def run_requester_scenario(settings: dict[str, Any], requester_count: int) -> list[dict[str, Any]]:
-    """Run a documented local scenario for 1, 5 or 10 requesters with independent accounts.
-    Keep first rewarded grants, unrewarded regrants, allowed and denied access in distinct groups.
-    Every role acts: deployer (deploy, set minter), clinic (attest), guardian (register, grant, revoke),
-    requesters from scenario_requester_account_indices (register, request). Redeploy fresh contracts
-    before each run, then re-register and re-attest. Report mean gas and time per operation and role.
+    """Run the local scenario for a number of requesters, each with its own account.
+        Every role acts: deployer, clinic, guardian and the requesters. Fresh contracts are deployed first.
 
-    Order, one transaction per block: deploy the three contracts and set the minter; the guardian and each
-    requester register; each requester is denied MISSING_EVIDENCE; the clinic attests; each is denied
-    NO_CONSENT; the guardian grants each one (rewarded); each is allowed, then denied HASH_MISMATCH with one
-    changed byte; the guardian revokes each (REVOKED) and regrants for 1 day (no reward); node time is set
-    to the latest expiry (EXPIRED); the guardian regrants after expiry (no reward). Every outcome is checked
-    against the decoded event and the reward balances at the end, so a wrong contract stops the run.
-    Returns one sample per transaction (see measure_transaction) with requester_count, role, contract,
-    function, scenario and order (phase, index), for summarize_samples.
+        Order, one transaction per block: deploy and set the minter; guardian and requesters register; each
+        requester is denied MISSING_EVIDENCE; the clinic attests; each is denied NO_CONSENT; the guardian grants
+        each one (rewarded); each is allowed, then denied HASH_MISMATCH with one changed byte; the guardian
+        revokes each and regrants for 1 day (no reward); node time moves to the latest expiry (EXPIRED); the
+        guardian regrants (no reward). Every outcome is checked against the decoded event and the final reward
+        balances, so a wrong contract stops the run. Returns one sample per transaction.
     """
-    # imported here: deploy_local imports this module for record_deployment_cost
+    # imported here to avoid a circular import (deploy_local imports this module)
     from scripts import deploy_local
 
     if isinstance(requester_count, bool) or not isinstance(requester_count, int) or requester_count < 1:
@@ -266,7 +252,7 @@ def run_requester_scenario(settings: dict[str, Any], requester_count: int) -> li
             if event is not None and (event["reason"] != expected or event["allowed"] != (expected == Reason.ALLOWED)):
                 got = Reason(event["reason"]).name
                 if event["reason"] == expected:
-                    # the reason is right, but the allowed flag contradicts it
+                    # reason is right but the allowed flag is wrong
                     got += f" with allowed={event['allowed']}"
                 raise MeasureError(f"{run}: requester {index + 1} expected {expected.name}, got {got}")
             record("requester", "ConsentManager", "requestAccess", REQUESTS[expected], measurement, index)
@@ -328,12 +314,10 @@ def run_requester_scenario(settings: dict[str, Any], requester_count: int) -> li
 
 
 def summarize_samples(samples: list[dict[str, Any]], keys: tuple[str, ...] = SUMMARY_KEYS) -> list[dict[str, Any]]:
-    """Compute sample count, total/average gas and average timings from like-for-like measured rows.
-    Do not double count internal token mint gas already included in a grant transaction.
-    Groups samples by keys (default: requester count, role, contract, function, scenario), in scenario
-    order. Only status "ok" samples are measured; the others count as failures. Values that were not
-    measured (no successful sample, no event) are None, never 0. A grant's gasUsed already contains the
-    mint it triggered, and no mint row exists, so the mint is counted exactly once.
+    """Group samples (by default requester count, role, contract, function, scenario) and compute
+        counts, total and average gas, and average times. Only "ok" samples count; others are failures.
+        Unmeasured values are None, never 0. A grant's gasUsed already includes its mint, so the mint is
+        counted once.
     """
     groups: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
     for sample in samples:
@@ -365,10 +349,9 @@ def summarize_samples(samples: list[dict[str, Any]], keys: tuple[str, ...] = SUM
 
 
 def write_results(path: Path, rows: list[dict[str, Any]], header: list[str] | None = None) -> None:
-    """Write observed results with scenario, sample count and units. Never prefill fabricated success/cost.
-    The header is the template of the same file name in evaluation/templates unless one is given, so the
-    columns and their units (gas, seconds) stay fixed. None is written as a blank cell, which
-    means not measured. An empty table is refused, because a header-only file reads like a template.
+    """Write the measured rows to a CSV. The header comes from the template in evaluation/templates.
+        None is written as a blank cell (not measured). An empty table is refused, because a header-only file
+        looks like a template.
     """
     path = Path(path)
     if header is None:
@@ -390,11 +373,9 @@ def write_results(path: Path, rows: list[dict[str, Any]], header: list[str] | No
 
 
 def main(argv: list[str] | None = None) -> None:
-    """Collect three deployment costs and core-function/scaling measurements.
-    Read-only RPC queries have no transaction receipt fee; describe those separately.
-    Runs the scenario for 1, 5 and 10 requesters, each on fresh contracts, and writes the tables only after
-    every run succeeded and the compiled contracts did not change meanwhile. View calls and reverted calls
-    have no receipt, so they have no rows; ENVIRONMENT.md says so. On failure print one reason and exit 1.
+    """Measure 1, 5 and 10 requesters, each on fresh contracts, and write the tables only if every run
+        succeeded and the compiled contracts did not change meanwhile. View calls and reverted calls have no
+        receipt, so they have no rows; ENVIRONMENT.md says so. On failure print one reason and exit 1.
     """
     parser = argparse.ArgumentParser(description="Measure gas and timing on the local Hardhat node")
     parser.add_argument(
@@ -406,10 +387,10 @@ def main(argv: list[str] | None = None) -> None:
         help="where the CSV files and ENVIRONMENT.md go (default: evaluation/results)",
     )
     args = parser.parse_args(argv)
-    # the command as given, without the paths, for ENVIRONMENT.md
+    # the command without paths, for ENVIRONMENT.md
     command = "python -m evaluation.measure" + " --settings PATH" * (args.settings is not None)
     command += " --output-dir DIR" * (args.output_dir is not None)
-    # imported here: deploy_local imports this module for record_deployment_cost
+    # imported here to avoid a circular import (deploy_local imports this module)
     from scripts.deploy_local import DeployError
 
     try:
@@ -417,7 +398,7 @@ def main(argv: list[str] | None = None) -> None:
         artifacts_before = _artifact_fingerprints()
         client = chain.connect(settings)
         node = _node_facts(client)
-        # every account of the largest run must exist before anything is sent
+        # check all accounts exist before sending anything
         requester_accounts(client, settings, max(REQUESTER_COUNTS))
         samples: list[dict[str, Any]] = []
         for count in REQUESTER_COUNTS:
@@ -429,7 +410,7 @@ def main(argv: list[str] | None = None) -> None:
     except (MeasureError, DeployError) as error:
         _stop(str(error))
     except DeploymentUnavailable:
-        # nothing here reads deployment.json, so it can only be a missing artifact
+        # deployment.json is not read here, so this can only be a missing artifact
         _stop(disclosure.NO_ARTIFACTS_MESSAGE)
     except Web3NotInstalled:
         _stop(disclosure.NO_WEB3_MESSAGE)
@@ -458,7 +439,7 @@ def main(argv: list[str] | None = None) -> None:
 
 
 def gas_table(samples: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """gas_results.csv rows: every run pooled, one row per role, contract, function and scenario."""
+    """gas_results.csv rows: all runs pooled, one row per role, contract, function and scenario."""
     sizes = {name: _runtime_size(name) for name in DEPLOY_ORDER}
     rows = []
     for summary in summarize_samples(samples, ("role", "contract", "function", "scenario")):
@@ -482,8 +463,7 @@ def gas_table(samples: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def timing_table(samples: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """timing_results.csv rows: per requester count, one row per role and operation. Every transaction is
-    in exactly one row, so the sample counts of one requester count add up to that run's transactions.
-    The per-role and whole-run means are in timing_summary_table, not here.
+        in exactly one row. The per-role and whole-run means are in timing_summary_table.
     """
     rows = []
     for count in sorted({sample["requester_count"] for sample in samples}):
@@ -496,9 +476,8 @@ def timing_table(samples: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def timing_summary_table(samples: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """timing_summary.csv rows: per requester count, one row per role and one for the whole run (mean over
-    mixed operations, total gas and wall clock in the notes). They pool the same transactions as the rows of
-    timing_results.csv, so they are in a file of their own and must never be added to those rows.
+    """timing_summary.csv rows: per requester count, one row per role and one for the whole run.
+        They use the same transactions as timing_results.csv, so they must never be added to those rows.
     """
     rows = []
     for count in sorted({sample["requester_count"] for sample in samples}):
@@ -522,8 +501,8 @@ def timing_summary_table(samples: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def requester_accounts(client: Any, settings: dict[str, Any], count: int) -> list[str]:
-    """The first count accounts of scenario_requester_account_indices, each distinct from the deployer,
-    clinic and guardian, resolved through chain.select_account like every other role.
+    """The first count accounts of scenario_requester_account_indices, each different from the
+        deployer, clinic and guardian.
     """
     indices = settings.get("scenario_requester_account_indices")
     roles = settings.get("actor_account_indices", {})
@@ -542,15 +521,15 @@ def requester_accounts(client: Any, settings: dict[str, Any], count: int) -> lis
 
 
 def synthetic_hash(label: str) -> bytes:
-    """A 32-byte stand-in for an identity or record commitment: SHA-256 of a fixed prefix and a label such
-    as "requester 3 identity, run N=5". Never derived from real data or any file.
+    """A 32-byte stand-in for an identity or record commitment: SHA-256 of a fixed prefix and a label.
+        Never made from real data.
     """
     return hashlib.sha256(b"MEASUREMENT-SYNTHETIC:v1\n" + label.encode("utf-8")).digest()
 
 
 def _warm_up(client: Any, deploy_local: Any, deployer: str, clinic: str) -> None:
-    """Untimed: read the artifacts and estimate the registry deploy, so the first timed transaction does
-    not also pay for web3's one-time setup. Nothing is sent.
+    """Untimed: read the artifacts and estimate the deploy, so the first timed transaction does not also
+        pay for web3's one-time setup. Nothing is sent.
     """
     artifact = deploy_local.load_artifact("IdentityRegistry")
     for name in DEPLOY_ORDER:
@@ -568,7 +547,7 @@ def _contract(client: Any, deploy_local: Any, name: str, address: str) -> Any:
 
 
 def _request(client: Any, manager: Any, requester: str, owner: str, observed_hash: bytes) -> dict[str, Any]:
-    # the same steps as chain.request_access, split so the receipt and the decoded event are timed apart
+    # same steps as chain.request_access, split so receipt and event decoding are timed separately
     def send() -> Receipt:
         return chain.send_transaction(client, manager.functions.requestAccess(owner, SCOPE, observed_hash), requester)
 
@@ -582,7 +561,7 @@ def _request(client: Any, manager: Any, requester: str, owner: str, observed_has
 
 
 def _logs_of(contract: Any, event_name: str, receipt: Receipt) -> list[Any]:
-    # process_receipt does not filter by address, so keep only this contract's logs, as chain.py does
+    # process_receipt does not filter by address, so keep only this contract's logs
     from web3.logs import DISCARD
 
     try:
@@ -611,7 +590,7 @@ def _grant_events(manager: Any, token: Any, receipt: Receipt, guardian: str, req
 
 
 def _check_rewards(token: Any, manager: Any, guardian: str, requesters: list[str], run: str) -> None:
-    # one lifetime reward per requester tuple, all to the guardian, none to a requester
+    # one lifetime reward per requester, all paid to the guardian
     count = len(requesters)
     guardian_balance = chain.get_reward_balance(token, account=guardian)
     supply = chain.call_view(token.functions.totalSupply())
@@ -917,7 +896,7 @@ def _cpu_name() -> str:
 
 
 def _shown(path: Path) -> str:
-    # relative to the project, or only the file name: never the home folder
+    # project-relative path or file name only, never the home folder
     return records.shown_path(path)
 
 

@@ -1,11 +1,6 @@
 # AI assistance: parts of this file were written with Claude (Anthropic) and thoroughly reviewed.
-"""Offline tests for the real app/chain.py. Contracts, clients and receipts are mocked or built by hand,
-so no node is needed; the web3 parts are skipped when web3 is not installed.
-Covers the one error mapping (revert names, panics, send-time reverts, connection errors, timeouts, a
-node that stops answering after the send, and bugs that must not look like a node failure), argument
-handling, the AccessAttempt checks in request_access, load_contract's provenance checks (the deploy block
-included), block_hash and get_consent. The last class checks that tests/fake_chain.py keeps the real
-signatures.
+"""Offline tests for app/chain.py. Contracts and clients are mocked, so no node is needed.
+The web3 tests are skipped when web3 is not installed.
 """
 import http.server
 import inspect

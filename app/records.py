@@ -1,13 +1,7 @@
 # AI assistance: parts of this file were written with Claude (Anthropic) and thoroughly reviewed.
-"""Local JSON persistence and salted byte-snapshot commitments.
-Use fixed demo filenames under a configured root; no database, encryption or version store.
-
-Bad or missing local files raise RecordError. Its message never holds the data, the salt or a path,
-and it is raised outside any except block so the original error (which can hold them) is not chained.
-Paths in settings are relative to the project root; an absolute path is used as given. The record is only
-ever saved inside the data root (settings data_root, see data_root), which is runtime-data by default.
-Salt files are created readable by their owner only (0600 on POSIX), since the salts are what keep the
-on-chain commitments from being brute-forced from the synthetic data.
+"""Reads and writes the local JSON files and makes salted hashes of them.
+Bad or missing files raise RecordError, whose message never contains data, salts or paths.
+Salt files are only readable by the owner where possible.
 """
 import base64
 import hashlib
@@ -21,13 +15,13 @@ from typing import Any
 from app.models import VaccinationCard, RecordSnapshot
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-# the data root when settings have no data_root; data_root(settings) gives the configured one
+# default data folder
 DATA_ROOT = PROJECT_ROOT / "runtime-data"
 EXAMPLES_DIR = PROJECT_ROOT / "data" / "examples"
 REGISTERING_LABELS = ("guardian", "school", "doctor")
 
 SALT_LENGTH = 32
-# new salt files: owner read/write only; records and identities keep the default mode
+# salt files: owner only
 SALT_FILE_MODE = 0o600
 COMMITMENT_PREFIXES = {
     "VACCINATION": b"VACCINATION:v1\n",
@@ -40,19 +34,11 @@ DATE_SHAPE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 
 
 class RecordError(ValueError):
-    """Local record, identity or salt is missing or invalid. Never a clinical result."""
+    """A local record, identity or salt is missing or invalid."""
 
 
 def save_record(path: Path, card: VaccinationCard, root: Path | None = None) -> None:
-    """Validate and save the synthetic local card before clinic attestation.
-    Input path must resolve inside the configured data root: root, which setup_runtime passes as
-    data_root(settings), or DATA_ROOT when none is given. Reject malformed fields
-    and unintended overwrite of the frozen evidence file; never save private keys.
-    Serialise as json.dumps(card, indent=2, ensure_ascii=False) plus one trailing newline, encode UTF-8
-    and write in binary mode (never write_text). That reproduces data/examples/vaccination_record.json
-    byte for byte (269 bytes, LF). Test vector with salt = bytes(range(32)) and the VACCINATION prefix:
-    3f2242f3cce59c18d546a104712ece887fdaf0563cd6bd3f4cb5c932cc6ec5b9.
-    """
+    """Check the card and save it once inside the data root. It is never overwritten."""
     target = Path(path).resolve()
     _check_inside(target, DATA_ROOT if root is None else root)
     try:
@@ -61,23 +47,17 @@ def save_record(path: Path, card: VaccinationCard, root: Path | None = None) -> 
         raw_bytes = None
     if raw_bytes is None:
         raise RecordError("record could not be serialised")
-    # check the exact bytes that will be written
     parse_record(raw_bytes)
     _write_new(target, raw_bytes, "record already exists and is frozen")
 
 
 def read_record_bytes(path: Path) -> bytes:
-    """Read one immutable byte snapshot of the controlled local JSON file.
-    Report missing/unreadable input as unavailable. Do not reread different bytes after authorization.
-    """
+    """Read the record file once as bytes."""
     return _read_once(path, "local record unavailable")
 
 
 def parse_record(raw_bytes: bytes) -> VaccinationCard:
-    """Decode UTF-8 and validate one child and one MMR vaccination event.
-    Require nonempty child ID, vaccine, coverage list, calendar date, clinic and batch.
-    Invalid data is not a negative medical result.
-    """
+    """Check the bytes are a valid card with one MMR vaccination."""
     card = _decode_json(raw_bytes, "record is not valid UTF-8 JSON")
     if not isinstance(card, dict) or set(card) != RECORD_KEYS:
         raise RecordError("record must have exactly child_id and vaccinations")
@@ -103,18 +83,12 @@ def parse_record(raw_bytes: bytes) -> VaccinationCard:
 
 
 def generate_salt() -> bytes:
-    """Generate exactly 32 cryptographically random bytes for one frozen commitment.
-    Use the standard secrets module; do not reuse fixed fixture salts.
-    """
+    """32 random bytes."""
     return secrets.token_bytes(SALT_LENGTH)
 
 
 def save_salt(path: Path, salt: bytes) -> None:
-    """Validate length and save the private salt locally as base64 metadata.
-    Never include it in contract calls, ordinary logs or requester responses.
-    File format (every salt file, vaccination and identity): {"salt_b64": "<44-char base64 of 32 bytes>"}.
-    The file is created with mode SALT_FILE_MODE (0600), so other local users cannot read it.
-    """
+    """Save a salt as base64 in a new file. Never send it to the chain."""
     if not isinstance(salt, bytes) or len(salt) != SALT_LENGTH:
         raise RecordError("salt must be exactly 32 bytes")
     text = json.dumps({"salt_b64": base64.b64encode(salt).decode("ascii")}) + "\n"
@@ -122,10 +96,7 @@ def save_salt(path: Path, salt: bytes) -> None:
 
 
 def load_salt(path: Path) -> bytes:
-    """Load the matching base64 salt and require exactly 32 bytes.
-    Expects the {"salt_b64": "..."} format written by save_salt.
-    A missing or invalid salt means unavailable evidence; never substitute an empty salt.
-    """
+    """Load a salt file and check it is 32 bytes."""
     content = _decode_json(_read_once(path, "salt unavailable"), "salt unavailable")
     if not isinstance(content, dict) or set(content) != {"salt_b64"} or not isinstance(content["salt_b64"], str):
         raise RecordError("salt unavailable")
@@ -139,11 +110,7 @@ def load_salt(path: Path) -> bytes:
 
 
 def calculate_commitment(raw_bytes: bytes, salt: bytes, purpose: str) -> bytes:
-    """Return 32-byte SHA-256(prefix + salt + exact bytes).
-    Only purposes VACCINATION and IDENTITY are supported. Prefix is the ASCII purpose
-    followed by :v1 and one newline. Validate salt length; no JSON canonicalization is used.
-    """
-    # error messages never include the record or salt
+    """SHA-256 of prefix + salt + the exact bytes. Purpose is VACCINATION or IDENTITY."""
     prefix = COMMITMENT_PREFIXES.get(purpose) if isinstance(purpose, str) else None
     if prefix is None:
         raise ValueError("unsupported commitment purpose")
@@ -155,10 +122,7 @@ def calculate_commitment(raw_bytes: bytes, salt: bytes, purpose: str) -> bytes:
 
 
 def load_snapshot(record_path: Path, salt_path: Path) -> RecordSnapshot:
-    """Read once, validate, load the matching salt and compute the commitment.
-    Return the same raw bytes, parsed card, salt and hash for internal verification.
-    The snapshot is never a public response.
-    """
+    """Read the record and salt once and compute the commitment."""
     raw_bytes = read_record_bytes(record_path)
     card = parse_record(raw_bytes)
     salt = load_salt(salt_path)
@@ -171,26 +135,19 @@ def load_snapshot(record_path: Path, salt_path: Path) -> RecordSnapshot:
 
 
 def prepare_identity(identity_path: Path, salt_path: Path) -> bytes:
-    """Validate synthetic identity attributes and compute a separate salted identity hash.
-    Keep unique demo ID/email and salt locally; registration sends only the resulting bytes32.
-    identity_path is <identity_directory>/<label>.json; salt_path is <identity_salt_directory>/identity_<label>_salt.json;
-    hash only that file's bytes with the IDENTITY:v1 prefix.
-    """
+    """Check an identity file and hash it with its salt. Only the hash goes on-chain."""
     raw_bytes = _read_once(identity_path, "identity unavailable")
     _check_identity(raw_bytes)
     return calculate_commitment(raw_bytes, load_salt(salt_path), "IDENTITY")
 
 
 def settings_path(settings: dict[str, Any], key: str) -> Path:
-    """Resolve one path setting against the project root. An absolute path is used as given."""
+    """Path from settings, relative to the project root."""
     return PROJECT_ROOT / settings[key]
 
 
 def data_root(settings: dict[str, Any]) -> Path:
-    """The configured data root: settings data_root resolved like every path setting (relative to the
-    project root, an absolute path as given), or DATA_ROOT (<project>/runtime-data) when settings have none.
-    A data_root that is not a nonempty path raises RecordError.
-    """
+    """The data folder from settings, or the default runtime-data folder."""
     if "data_root" not in settings:
         return DATA_ROOT
     value = settings["data_root"]
@@ -200,9 +157,7 @@ def data_root(settings: dict[str, Any]) -> Path:
 
 
 def shown_path(path: Path, settings: dict[str, Any] | None = None) -> str:
-    """A path for console text that never shows the home folder or the user name: relative to the project
-    root when inside it, else as <data_root>/... when inside data_root(settings), else only the file name.
-    """
+    """A path for console output that hides the home folder."""
     target = Path(path).resolve()
     try:
         return target.relative_to(PROJECT_ROOT.resolve()).as_posix()
@@ -219,7 +174,7 @@ def shown_path(path: Path, settings: dict[str, Any] | None = None) -> str:
 
 
 def identity_paths(settings: dict[str, Any], label: str) -> tuple[Path, Path]:
-    """Identity file and identity salt file for guardian, school or doctor."""
+    """Identity file and salt file for a label."""
     if label not in REGISTERING_LABELS:
         raise ValueError("only guardian, school and doctor register")
     identity_path = settings_path(settings, "identity_directory") / f"{label}.json"
@@ -228,10 +183,7 @@ def identity_paths(settings: dict[str, Any], label: str) -> tuple[Path, Path]:
 
 
 def setup_runtime(settings: dict[str, Any]) -> list[Path]:
-    """Copy the example identities and card into the runtime folders and give each file its own salt.
-    Repeatable: files that already exist are left alone. Returns the files it created.
-    The record goes to vaccination_file, which must be inside data_root(settings); otherwise nothing is created.
-    """
+    """Copy the example files into the runtime folders and make salts. Existing files are left alone."""
     root = data_root(settings)
     record_path = settings_path(settings, "vaccination_file")
     if not record_path.exists():
@@ -258,7 +210,7 @@ def setup_runtime(settings: dict[str, Any]) -> list[Path]:
 
 
 def _check_inside(target: Path, root: Path) -> None:
-    # target is already resolved; the root itself does not count as inside
+    # the root folder itself does not count
     if Path(root).resolve() not in target.parents:
         raise RecordError("record path must be inside the data root")
 
@@ -273,7 +225,7 @@ def _read_once(path: Path, message: str) -> bytes:
 
 
 def _write_new(path: Path, data: bytes, exists_message: str, mode: int = 0o666) -> None:
-    # O_EXCL refuses to replace a file that is already there; mode is before the umask, as for open()
+    # O_EXCL means never overwrite an existing file
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), mode)
@@ -288,7 +240,7 @@ def _write_new(path: Path, data: bytes, exists_message: str, mode: int = 0o666) 
 
 
 def _decode_json(raw_bytes: bytes, message: str) -> Any:
-    # strict UTF-8, and a repeated key is an error rather than last one wins
+    # repeated keys are an error
     if not isinstance(raw_bytes, bytes):
         raise TypeError("expected raw bytes")
     try:
@@ -319,7 +271,7 @@ def _is_text(value: Any) -> bool:
 
 
 def _is_calendar_date(value: str) -> bool:
-    # fromisoformat on its own also takes 20260312 and week dates from Python 3.11
+    # fromisoformat alone accepts other formats too
     if not DATE_SHAPE.fullmatch(value):
         return False
     try:

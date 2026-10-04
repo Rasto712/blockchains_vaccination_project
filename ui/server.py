@@ -1,24 +1,12 @@
 # AI assistance: parts of this file were written with Claude (Anthropic) and thoroughly reviewed.
-"""The local web UI: a small HTTP server for the page in ui/static and its JSON endpoints under /api/.
-Run from the project root after npm run compile, with npm run node running and contracts deployed (the
-page can also deploy them):
+"""Small local web server for the page in ui/static, plus the JSON endpoints under /api/.
+Run it from the project root with the node running:
     .venv/bin/python -m ui.server [--settings PATH] [--port 8000]
-then open http://127.0.0.1:8000/ (or http://localhost:8000/). Ctrl+C stops it.
+then open http://127.0.0.1:8000/. Ctrl+C stops it.
 
-Demo mode, not authentication: the page picks the acting role. Register, attest, grant and revoke go from the
-browser straight to the node with Viem (ui/static/chain.js), from that role's unlocked Hardhat account; the
-page gets the checked addresses and ABIs from GET /api/contracts and the two local hashes from
-GET /api/identity-hash and GET /api/record-commitment. School and doctor requests, setup, deploy and the
-guided demo run here, signed with the role's account as the console does, because disclosure needs the local
-card and salts, which never reach the browser. The server listens on 127.0.0.1 only. It refuses a request
-whose Host is not 127.0.0.1:<port> or localhost:<port> (DNS rebinding), and a POST from another Origin or
-without a JSON body (cross-site forms). Every response forbids framing, inline code and caching, and may
-connect only here and to the rpc_url origin. POST actions, the guided demo's steps and the demo controls
-(ui/demo.py, under /api/demo/) share one lock, so they never interleave with each other; GET requests do not
-wait for it. The page's Viem transactions cannot take it: the page runs one action at a time in every tab of
-its origin (a Web Lock), which keeps them out of a guided step started there, but not out of one started from
-the other host name or another process. The page only ever gets the fixed texts of ui/actions.py, never
-exception text or a traceback, and the server log shows only the type of a failure.
+This is a demo, not real login: the page just picks the acting role. It only listens on 127.0.0.1 and checks
+the Host and Origin headers. POST actions share one lock; GET requests do not wait for it. The page only ever
+gets the fixed texts from ui/actions.py, never exception text or a traceback.
 """
 import argparse
 import json
@@ -38,7 +26,7 @@ SETTINGS_FILE = records.PROJECT_ROOT / "config" / "settings.json"
 HOST = "127.0.0.1"
 DEFAULT_PORT = 8000
 STATIC_DIR = Path(__file__).resolve().parent / "static"
-# the only files served; nothing from the URL is ever used as a path
+# the only files we serve; the URL is never used as a file path
 STATIC_FILES = {
     "index.html": "text/html; charset=utf-8",
     "app.css": "text/css; charset=utf-8",
@@ -46,13 +34,13 @@ STATIC_FILES = {
     "app.js": "text/javascript; charset=utf-8",
     "demo.js": "text/javascript; charset=utf-8",
 }
-# generated files, served the same way: the Viem bundle that npm run build:ui makes from static/src/viem.js
+# generated file: the Viem bundle made by npm run build:ui
 VENDOR_FILES = {
     "vendor/viem.js": "text/javascript; charset=utf-8",
 }
 SERVED_FILES = {**STATIC_FILES, **VENDOR_FILES}
 MAX_BODY_BYTES = 16 * 1024
-# the Content-Security-Policy is per server (content_security_policy), because it names the node's origin
+# the Content-Security-Policy is built per server, since it names the node's origin
 SECURITY_HEADERS = (
     ("X-Frame-Options", "DENY"),
     ("X-Content-Type-Options", "nosniff"),
@@ -63,7 +51,7 @@ ACTOR_LABELS = ("deployer", "clinic", "guardian", "school", "doctor")
 
 
 def _post_routes() -> dict[str, Any]:
-    # path -> function(server, body) returning a result; each runs under the action lock
+    # path -> function(server, body); each runs under the action lock
     return {
         "/api/setup": lambda server, body: actions.perform(actions.setup, server.settings),
         "/api/deploy": lambda server, body: server.deploy(),
@@ -87,7 +75,7 @@ def _post_routes() -> dict[str, Any]:
 
 
 def _get_routes() -> dict[str, Any]:
-    # path -> function(server, query) returning a result; none of them waits for the action lock
+    # path -> function(server, query); these do not wait for the lock
     return {
         "/api/contracts": lambda server, query: actions.perform(actions.contracts, server.settings, server.rpc_url),
         "/api/identity-hash": lambda server, query: actions.perform(
@@ -98,9 +86,8 @@ def _get_routes() -> dict[str, Any]:
 
 
 def rpc_origin(rpc_url: Any) -> str | None:
-    """scheme://host[:port] of the settings' rpc_url, for the CSP's connect-src, or None when it is not a plain
-    http(s) URL without user info whose host is an ASCII name or IPv4 address. Built from the parsed parts only,
-    so nothing else from the setting can reach the header.
+    """scheme://host[:port] of the settings' rpc_url (used for the CSP), or None if it is not a plain
+    http(s) URL. Only the parsed parts are used, so nothing else from the setting reaches the header.
     """
     if not isinstance(rpc_url, str):
         return None
@@ -118,13 +105,13 @@ def rpc_origin(rpc_url: Any) -> str | None:
 
 
 def content_security_policy(origin: str | None) -> str:
-    """The page's policy: everything from this server only, plus connections to the node's origin for Viem."""
+    """The page's security policy: only this server, plus the node's origin for Viem."""
     connect = f"'self' {origin}" if origin else "'self'"
     return f"default-src 'self'; connect-src {connect}; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
 
 
 def allowed_hosts(port: int) -> set[str]:
-    """The Host values of this page: 127.0.0.1 and localhost with the port (browsers leave out port 80)."""
+    """The Host values we accept: 127.0.0.1 and localhost with the port."""
     hosts = {f"{HOST}:{port}", f"localhost:{port}"}
     if port == 80:
         hosts |= {HOST, "localhost"}
@@ -132,7 +119,7 @@ def allowed_hosts(port: int) -> set[str]:
 
 
 class UIServer(ThreadingHTTPServer):
-    """The HTTP server with the settings, the settings file (for deploy_local) and the action lock."""
+    """The HTTP server. Holds the settings and the action lock."""
 
     daemon_threads = True
 
@@ -143,7 +130,7 @@ class UIServer(ThreadingHTTPServer):
         self.guided = demo.GuidedDemo()
         self.post_routes = _post_routes()
         self.get_routes = _get_routes()
-        # the URL the page's Viem layer uses: the origin the CSP allows, and the setting's path
+        # the URL the page uses for Viem: the allowed origin plus the setting's path
         self.rpc_origin = rpc_origin(settings.get("rpc_url"))
         self.rpc_url = self.rpc_origin + urlsplit(settings["rpc_url"]).path if self.rpc_origin else ""
         self.csp = content_security_policy(self.rpc_origin)
@@ -152,11 +139,10 @@ class UIServer(ThreadingHTTPServer):
         self.allowed_origins = {f"http://{host}" for host in self.allowed_hosts}
 
     def state(self, chain_views: bool = True) -> dict[str, Any]:
-        """The page's snapshot, with the guided demo's progress."""
+        """The page's snapshot, plus the guided demo progress."""
         snapshot = actions.state(self.settings, chain_views)
         progress = self.guided.progress()
-        # the guided demo ends when its contracts are gone (a node restart, a recompile) or replaced
-        # (deploy_local --reset, the scripted demo), even by contracts at the same addresses
+        # the guided demo ends when its contracts are gone or replaced, even at the same addresses
         deployment, node = snapshot["deployment"], snapshot["node"]
         started_on = (progress.pop("contracts"), progress.pop("deploy_block"))
         replaced = deployment["deployed"] and (deployment["contracts"], deployment["deploy_block"]) != started_on
@@ -166,19 +152,19 @@ class UIServer(ThreadingHTTPServer):
         return snapshot
 
     def deploy(self) -> dict[str, Any]:
-        """Fresh contracts from the page; the guided demo's progress belonged to the old ones."""
+        """Deploy fresh contracts. The demo progress belonged to the old ones, so it is reset."""
         answer = actions.perform(actions.deploy, self.settings_path)
         if answer["status"] == "ok":
             self.guided.reset()
         return answer
 
     def server_bind(self) -> None:
-        # HTTPServer.server_bind looks up the host name, which can take seconds; the name is known
+        # skip HTTPServer.server_bind, its host name lookup can take seconds
         socketserver.TCPServer.server_bind(self)
         self.server_name, self.server_port = HOST, self.server_address[1]
 
     def handle_error(self, request: Any, client_address: Any) -> None:
-        # a dropped connection or an error outside a handler: one line with the type, never a traceback
+        # one line with the error type, never a traceback
         print(f"ui: request failed: {sys.exc_info()[0].__name__}", file=sys.stderr, flush=True)
 
 
@@ -194,11 +180,11 @@ class Handler(BaseHTTPRequestHandler):
         self._handle(self._post)
 
     def log_message(self, format: str, *args: Any) -> None:
-        # the page polls every 2 seconds, so request lines would flood the terminal
+        # the page polls every 2 seconds, so logging each request would flood the terminal
         return
 
     def send_error(self, code: int, message: str | None = None, explain: str | None = None) -> None:
-        # http.server's own refusals (a bad request line, an unsupported method) as JSON with the same headers
+        # answer http.server's own errors as JSON too
         self.close_connection = True
         self._send_json(HTTPStatus(code), actions.result("invalid", f"HTTP {code}"))
 
@@ -223,7 +209,7 @@ class Handler(BaseHTTPRequestHandler):
         elif url.path == "/favicon.ico":
             self._send(HTTPStatus.NO_CONTENT, b"", "text/plain")
         elif url.path == "/api/state":
-            # the page asks for chain_views=0: it reads the contract views itself with Viem
+            # chain_views=0: the page reads the contract views itself
             chain_views = parse_qs(url.query).get("chain_views") != ["0"]
             self._send_json(HTTPStatus.OK, self.server.state(chain_views))
         elif url.path in self.server.get_routes:
@@ -253,7 +239,7 @@ class Handler(BaseHTTPRequestHandler):
         if route is None:
             self._send_json(HTTPStatus.NOT_FOUND, actions.result("invalid", "not found"))
             return
-        # a JSON body cannot come from a plain cross-site form, and needs a preflight this server never answers
+        # a plain cross-site form cannot send JSON, so this blocks cross-site posts
         if self.headers.get("Content-Type", "").split(";")[0].strip().lower() != "application/json":
             self._send_json(HTTPStatus.UNSUPPORTED_MEDIA_TYPE, actions.result("invalid", "send the request as JSON"))
             return
@@ -303,7 +289,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def read_settings(path: Path) -> dict[str, Any]:
-    """Read the settings file; on a problem print one line (as the console does) and exit 1."""
+    """Read the settings file; if that fails, print one line and exit 1."""
     try:
         settings = json.loads(Path(path).read_bytes())
     except OSError:
@@ -320,7 +306,7 @@ def read_settings(path: Path) -> dict[str, Any]:
 
 
 def main(argv: list[str] | None = None) -> None:
-    """Serve the page on 127.0.0.1 until Ctrl+C."""
+    """Start the server on 127.0.0.1 until Ctrl+C."""
     parser = argparse.ArgumentParser(description="Serve the My Vaccination Card web UI on 127.0.0.1")
     parser.add_argument(
         "--settings", type=Path, default=SETTINGS_FILE, metavar="PATH",
@@ -335,7 +321,7 @@ def main(argv: list[str] | None = None) -> None:
         _exit(f"cannot listen on {HOST}:{args.port}: the port is in use or invalid; pick another with --port")
     print(f"My Vaccination Card UI: http://{HOST}:{server.server_address[1]}/  (Ctrl+C stops it)", flush=True)
     if server.rpc_origin is None:
-        # the URL itself is not printed: it could hold a user name or password
+        # do not print the URL, it could contain a password
         print("ui: rpc_url in the settings is not a plain http(s) URL, so the page cannot reach the node",
               file=sys.stderr, flush=True)
     try:
